@@ -55,6 +55,134 @@ class AIService {
         throw new Error('OpenAI integration not yet implemented. Please use Claude.');
     }
 
+    async improveCopy(subjectLine, emailCopy, review) {
+        if (this.provider === 'claude') {
+            return await this.improveWithClaude(subjectLine, emailCopy, review);
+        } else if (this.provider === 'openai') {
+            return await this.improveWithOpenAI(subjectLine, emailCopy, review);
+        } else {
+            throw new Error('Invalid AI provider specified');
+        }
+    }
+
+    async improveWithClaude(subjectLine, emailCopy, review) {
+        const systemPrompt = this.buildImproveSystemPrompt();
+        const userPrompt = this.buildImproveUserPrompt(subjectLine, emailCopy, review);
+
+        try {
+            const message = await this.anthropic.messages.create({
+                model: 'claude-3-5-sonnet-20241022',
+                max_tokens: 2000,
+                temperature: 0.8,
+                system: systemPrompt,
+                messages: [
+                    {
+                        role: 'user',
+                        content: userPrompt
+                    }
+                ]
+            });
+
+            const responseText = message.content[0].text;
+            return this.parseImproveResponse(responseText);
+        } catch (error) {
+            console.error('Claude API error:', error);
+            throw new Error('Failed to generate improved copy from Claude API');
+        }
+    }
+
+    async improveWithOpenAI(subjectLine, emailCopy, review) {
+        throw new Error('OpenAI integration not yet implemented. Please use Claude.');
+    }
+
+    buildImproveSystemPrompt() {
+        const bestCopiesContext = bestPerformingCopies.getBestCopiesSummary();
+        const bestPracticesContext = getBestPracticesContext();
+
+        return `You are an expert cold email copywriter. Your role is to rewrite cold emails to maximize response rates based on proven best practices and patterns.
+
+${bestPracticesContext}
+
+BEST PERFORMING PATTERNS (from our database):
+${bestCopiesContext}
+
+Your rewrite should:
+1. Apply the feedback from the review
+2. Follow the patterns from our best performing emails
+3. Maintain the core value proposition but improve delivery
+4. Be specific, personalized, and action-oriented
+5. Optimize for clarity and brevity (70-95 words for body)
+6. Use conversational, authentic tone
+
+Respond ONLY with valid JSON in this exact structure:
+{
+    "improvedSubject": "<improved subject line>",
+    "improvedBody": "<improved email body>",
+    "changes": [
+        {
+            "category": "<what was changed>",
+            "reason": "<why this change improves the copy>"
+        }
+    ],
+    "expectedImpact": "<brief summary of how this should perform better>"
+}`;
+    }
+
+    buildImproveUserPrompt(subjectLine, emailCopy, review) {
+        return `Based on the review feedback below, please rewrite this cold email to maximize response rate.
+
+---ORIGINAL SUBJECT LINE---
+${subjectLine}
+---END SUBJECT LINE---
+
+---ORIGINAL EMAIL BODY---
+${emailCopy}
+---END EMAIL BODY---
+
+---REVIEW FEEDBACK---
+Score: ${review.overallScore}/100
+${JSON.stringify(review.sections, null, 2)}
+---END REVIEW FEEDBACK---
+
+Generate an improved version that addresses the feedback and follows best performing patterns. Provide your response in the JSON format specified.`;
+    }
+
+    parseImproveResponse(responseText) {
+        try {
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                // Clean the JSON string by removing control characters within string values
+                let jsonString = jsonMatch[0];
+
+                // First try to parse directly
+                try {
+                    const parsed = JSON.parse(jsonString);
+                    return this.validateImproveResponse(parsed);
+                } catch (parseError) {
+                    // If that fails, try a more aggressive cleaning approach
+                    console.log('Initial parse failed, attempting to clean JSON...');
+
+                    // Remove control characters but preserve intentional newlines in content
+                    jsonString = jsonString.replace(/[\u0000-\u001F]+/g, ' ');
+
+                    const parsed = JSON.parse(jsonString);
+                    return this.validateImproveResponse(parsed);
+                }
+            }
+            throw new Error('No valid JSON found in response');
+        } catch (error) {
+            console.error('Failed to parse improve response:', error);
+            throw new Error('Failed to parse improved copy response');
+        }
+    }
+
+    validateImproveResponse(response) {
+        if (!response.improvedSubject || !response.improvedBody) {
+            throw new Error('Invalid improve response structure');
+        }
+        return response;
+    }
+
     buildSystemPrompt() {
         const bestCopiesContext = bestPerformingCopies.getBestCopiesSummary();
         const bestPracticesContext = getBestPracticesContext();

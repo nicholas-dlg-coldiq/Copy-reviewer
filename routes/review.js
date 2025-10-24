@@ -36,4 +36,44 @@ router.post('/review-copy', async (req, res) => {
     }
 });
 
+// POST /api/improve
+router.post('/improve', async (req, res) => {
+    try {
+        const { subjectLine, copy, review } = req.body;
+
+        // Validate inputs
+        if (!subjectLine || typeof subjectLine !== 'string' || subjectLine.trim().length === 0) {
+            return res.status(400).json({
+                error: 'Invalid request',
+                message: 'Subject line is required and must be a non-empty string'
+            });
+        }
+
+        if (!copy || typeof copy !== 'string' || copy.trim().length === 0) {
+            return res.status(400).json({
+                error: 'Invalid request',
+                message: 'Email body is required and must be a non-empty string'
+            });
+        }
+
+        if (!review || typeof review !== 'object') {
+            return res.status(400).json({
+                error: 'Invalid request',
+                message: 'Review data is required'
+            });
+        }
+
+        // Get improved copy from AI service
+        const improvedCopy = await aiService.improveCopy(subjectLine, copy, review);
+
+        res.json(improvedCopy);
+    } catch (error) {
+        console.error('Error in improve endpoint:', error);
+        res.status(500).json({
+            error: 'Improvement failed',
+            message: error.message || 'Failed to generate improved copy. Please try again.'
+        });
+    }
+});
+
 module.exports = router;

@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "Bash(npm install)",
-      "Bash(npm start)"
+      "Bash(npm start)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill //F //PID 60448)",
+      "Bash(taskkill //F //PID 27488)",
+      "Bash(taskkill //F //PID 29988)",
+      "Bash(taskkill //F //PID 22556)",
+      "Bash(taskkill //F //PID 12128)",
+      "Bash(netstat:*)",
+      "Bash(taskkill //F //PID 85368)"
     ],
     "deny": [],
     "ask": []

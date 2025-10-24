@@ -11,16 +11,23 @@ const subjectCounter = document.getElementById('subjectCounter');
 const bodyCounter = document.getElementById('bodyCounter');
 const reviewBtn = document.getElementById('reviewBtn');
 const clearBtn = document.getElementById('clearBtn');
+const improveBtn = document.getElementById('improveBtn');
 const resultsSection = document.getElementById('resultsSection');
 const reviewContent = document.getElementById('reviewContent');
+const improvedSection = document.getElementById('improvedSection');
+const improvedContent = document.getElementById('improvedContent');
 const errorSection = document.getElementById('errorSection');
 const errorMessage = document.getElementById('errorMessage');
 const overallScore = document.getElementById('overallScore');
 const demoModeToggle = document.getElementById('demoModeToggle');
 
+// State to store current review
+let currentReview = null;
+
 // Event Listeners
 reviewBtn.addEventListener('click', handleReviewClick);
 clearBtn.addEventListener('click', handleClearClick);
+improveBtn.addEventListener('click', handleImproveClick);
 subjectLineInput.addEventListener('input', updateSubjectCounter);
 emailCopyTextarea.addEventListener('input', updateBodyCounter);
 
@@ -87,8 +94,42 @@ function handleClearClick() {
     updateSubjectCounter();
     updateBodyCounter();
     hideResults();
+    hideImproved();
     hideError();
+    currentReview = null;
     subjectLineInput.focus();
+}
+
+// Handle Improve Button Click
+async function handleImproveClick() {
+    if (!currentReview) {
+        showError('Please review your copy first before generating improvements.');
+        return;
+    }
+
+    const subjectLine = subjectLineInput.value.trim();
+    const copyText = emailCopyTextarea.value.trim();
+
+    // Hide previous errors
+    hideError();
+    hideImproved();
+
+    // Show loading state for improve button
+    setImproveLoadingState(true);
+
+    try {
+        const result = await improveCopy(subjectLine, copyText, currentReview);
+        displayImprovedCopy(result);
+    } catch (error) {
+        showError(error.message || 'An error occurred while generating improved copy. Please try again.');
+    } finally {
+        setImproveLoadingState(false);
+    }
+}
+
+// Toggle collapsible sections
+function toggleReviewContent() {
+    reviewContent.classList.toggle('collapsed');
 }
 
 // Review Copy - API Call
@@ -121,6 +162,9 @@ async function reviewCopy(subjectLine, copyText) {
 
 // Display Results
 function displayResults(result) {
+    // Store current review for improve functionality
+    currentReview = result;
+
     // Clear previous content
     reviewContent.innerHTML = '';
 
@@ -137,7 +181,15 @@ function displayResults(result) {
         });
     }
 
-    // Show results
+    // Add click handler to results title
+    const resultsTitle = document.querySelector('.results-title');
+    if (resultsTitle) {
+        resultsTitle.onclick = toggleReviewContent;
+    }
+
+    // Show improve button and results
+    improveBtn.style.display = 'inline-flex';
+    reviewContent.classList.add('collapsed'); // Start collapsed
     resultsSection.style.display = 'block';
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -226,6 +278,124 @@ function hideError() {
 // Hide Results
 function hideResults() {
     resultsSection.style.display = 'none';
+    improveBtn.style.display = 'none';
+}
+
+// Hide Improved Section
+function hideImproved() {
+    improvedSection.style.display = 'none';
+}
+
+// Improve Copy - API Call
+async function improveCopy(subjectLine, copyText, review) {
+    // For production, call your backend API
+    const response = await fetch('/api/improve', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            subjectLine: subjectLine,
+            copy: copyText,
+            review: review
+        }),
+        signal: AbortSignal.timeout(API_CONFIG.timeout)
+    });
+
+    if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data;
+}
+
+// Display Improved Copy
+function displayImprovedCopy(result) {
+    improvedContent.innerHTML = '';
+
+    // Create improved copy display
+    const improvedDiv = document.createElement('div');
+    improvedDiv.className = 'improved-wrapper';
+
+    // Improved Subject
+    const subjectSection = document.createElement('div');
+    subjectSection.className = 'improved-section-block';
+    subjectSection.innerHTML = `
+        <h3 class="improved-section-title">Subject Line</h3>
+        <div class="improved-text-box">
+            <p class="improved-text">${escapeHtml(result.improvedSubject)}</p>
+        </div>
+    `;
+    improvedDiv.appendChild(subjectSection);
+
+    // Improved Body
+    const bodySection = document.createElement('div');
+    bodySection.className = 'improved-section-block';
+    bodySection.innerHTML = `
+        <h3 class="improved-section-title">Email Body</h3>
+        <div class="improved-text-box">
+            <p class="improved-text" style="white-space: pre-wrap;">${escapeHtml(result.improvedBody)}</p>
+        </div>
+    `;
+    improvedDiv.appendChild(bodySection);
+
+    // Changes Made
+    if (result.changes && Array.isArray(result.changes) && result.changes.length > 0) {
+        const changesSection = document.createElement('div');
+        changesSection.className = 'improved-section-block';
+        const changesTitle = document.createElement('h3');
+        changesTitle.className = 'improved-section-title';
+        changesTitle.textContent = 'Key Changes';
+        changesSection.appendChild(changesTitle);
+
+        const changesList = document.createElement('ul');
+        changesList.className = 'changes-list';
+        result.changes.forEach(change => {
+            const li = document.createElement('li');
+            li.innerHTML = `<strong>${escapeHtml(change.category)}:</strong> ${escapeHtml(change.reason)}`;
+            changesList.appendChild(li);
+        });
+        changesSection.appendChild(changesList);
+        improvedDiv.appendChild(changesSection);
+    }
+
+    // Expected Impact
+    if (result.expectedImpact) {
+        const impactSection = document.createElement('div');
+        impactSection.className = 'improved-section-block impact-box';
+        impactSection.innerHTML = `
+            <strong>Expected Impact:</strong> ${escapeHtml(result.expectedImpact)}
+        `;
+        improvedDiv.appendChild(impactSection);
+    }
+
+    improvedContent.appendChild(improvedDiv);
+    improvedSection.style.display = 'block';
+    improvedSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Set Improve Button Loading State
+function setImproveLoadingState(isLoading) {
+    const btnText = improveBtn.querySelector('.btn-text');
+    const btnLoader = improveBtn.querySelector('.btn-loader');
+
+    if (isLoading) {
+        btnText.style.display = 'none';
+        btnLoader.style.display = 'inline-flex';
+        improveBtn.disabled = true;
+    } else {
+        btnText.style.display = 'inline';
+        btnLoader.style.display = 'none';
+        improveBtn.disabled = false;
+    }
 }
 
 // Demo Mode Response - For testing without backend
