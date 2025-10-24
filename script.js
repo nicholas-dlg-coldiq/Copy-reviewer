@@ -1,0 +1,299 @@
+// API Configuration
+const API_CONFIG = {
+    endpoint: '/api/review-copy', // This will be your backend endpoint
+    timeout: 30000 // 30 seconds
+};
+
+// DOM Elements
+const subjectLineInput = document.getElementById('subjectLine');
+const emailCopyTextarea = document.getElementById('emailCopy');
+const subjectCounter = document.getElementById('subjectCounter');
+const bodyCounter = document.getElementById('bodyCounter');
+const reviewBtn = document.getElementById('reviewBtn');
+const clearBtn = document.getElementById('clearBtn');
+const resultsSection = document.getElementById('resultsSection');
+const reviewContent = document.getElementById('reviewContent');
+const errorSection = document.getElementById('errorSection');
+const errorMessage = document.getElementById('errorMessage');
+const overallScore = document.getElementById('overallScore');
+const demoModeToggle = document.getElementById('demoModeToggle');
+
+// Event Listeners
+reviewBtn.addEventListener('click', handleReviewClick);
+clearBtn.addEventListener('click', handleClearClick);
+subjectLineInput.addEventListener('input', updateSubjectCounter);
+emailCopyTextarea.addEventListener('input', updateBodyCounter);
+
+// Initialize counters on page load
+updateSubjectCounter();
+updateBodyCounter();
+
+// Word Counter Functions
+function countWords(text) {
+    if (!text || !text.trim()) return 0;
+    return text.trim().split(/\s+/).length;
+}
+
+function updateSubjectCounter() {
+    const wordCount = countWords(subjectLineInput.value);
+    subjectCounter.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
+}
+
+function updateBodyCounter() {
+    const wordCount = countWords(emailCopyTextarea.value);
+    bodyCounter.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
+}
+
+// Handle Review Button Click
+async function handleReviewClick() {
+    const subjectLine = subjectLineInput.value.trim();
+    const copyText = emailCopyTextarea.value.trim();
+
+    // Validation - both fields required
+    if (!subjectLine && !copyText) {
+        showError('Please enter both a subject line and email body.');
+        return;
+    }
+    if (!subjectLine) {
+        showError('Please enter a subject line.');
+        return;
+    }
+    if (!copyText) {
+        showError('Please enter your email body.');
+        return;
+    }
+
+    // Hide previous results/errors
+    hideError();
+    hideResults();
+
+    // Show loading state
+    setLoadingState(true);
+
+    try {
+        const result = await reviewCopy(subjectLine, copyText);
+        displayResults(result);
+    } catch (error) {
+        showError(error.message || 'An error occurred while reviewing your copy. Please try again.');
+    } finally {
+        setLoadingState(false);
+    }
+}
+
+// Handle Clear Button Click
+function handleClearClick() {
+    subjectLineInput.value = '';
+    emailCopyTextarea.value = '';
+    updateSubjectCounter();
+    updateBodyCounter();
+    hideResults();
+    hideError();
+    subjectLineInput.focus();
+}
+
+// Review Copy - API Call
+async function reviewCopy(subjectLine, copyText) {
+    // Check if demo mode is enabled
+    if (demoModeToggle.checked) {
+        return getDemoResponse(subjectLine, copyText);
+    }
+
+    // For production, call your backend API
+    const response = await fetch(API_CONFIG.endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            subjectLine: subjectLine,
+            copy: copyText
+        }),
+        signal: AbortSignal.timeout(API_CONFIG.timeout)
+    });
+
+    if (!response.ok) {
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data;
+}
+
+// Display Results
+function displayResults(result) {
+    // Clear previous content
+    reviewContent.innerHTML = '';
+
+    // Set overall score
+    const score = result.overallScore || 0;
+    overallScore.innerHTML = `Score: ${score}/100`;
+    overallScore.className = 'overall-score ' + getScoreClass(score);
+
+    // Create sections based on the result structure
+    if (result.sections && Array.isArray(result.sections)) {
+        result.sections.forEach(section => {
+            const sectionEl = createReviewSection(section);
+            reviewContent.appendChild(sectionEl);
+        });
+    }
+
+    // Show results
+    resultsSection.style.display = 'block';
+    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Create Review Section Element
+function createReviewSection(section) {
+    const sectionDiv = document.createElement('div');
+    sectionDiv.className = 'review-section';
+
+    const title = document.createElement('h3');
+    title.textContent = section.title;
+    sectionDiv.appendChild(title);
+
+    if (section.content) {
+        const content = document.createElement('p');
+        content.textContent = section.content;
+        sectionDiv.appendChild(content);
+    }
+
+    if (section.items && Array.isArray(section.items)) {
+        const list = document.createElement('ul');
+        section.items.forEach(item => {
+            const li = document.createElement('li');
+            li.textContent = item;
+            list.appendChild(li);
+        });
+        sectionDiv.appendChild(list);
+    }
+
+    if (section.highlight) {
+        const highlightBox = document.createElement('div');
+        highlightBox.className = 'highlight-box';
+        const strong = document.createElement('strong');
+        strong.textContent = section.highlight.title || 'Important:';
+        highlightBox.appendChild(strong);
+        const text = document.createTextNode(section.highlight.content);
+        highlightBox.appendChild(text);
+        sectionDiv.appendChild(highlightBox);
+    }
+
+    return sectionDiv;
+}
+
+// Get Score Class for Styling
+function getScoreClass(score) {
+    if (score >= 80) return 'score-excellent';
+    if (score >= 60) return 'score-good';
+    if (score >= 40) return 'score-fair';
+    return 'score-poor';
+}
+
+// Set Loading State
+function setLoadingState(isLoading) {
+    const btnText = reviewBtn.querySelector('.btn-text');
+    const btnLoader = reviewBtn.querySelector('.btn-loader');
+
+    if (isLoading) {
+        btnText.style.display = 'none';
+        btnLoader.style.display = 'inline-flex';
+        reviewBtn.disabled = true;
+        clearBtn.disabled = true;
+        subjectLineInput.disabled = true;
+        emailCopyTextarea.disabled = true;
+    } else {
+        btnText.style.display = 'inline';
+        btnLoader.style.display = 'none';
+        reviewBtn.disabled = false;
+        clearBtn.disabled = false;
+        subjectLineInput.disabled = false;
+        emailCopyTextarea.disabled = false;
+    }
+}
+
+// Show Error
+function showError(message) {
+    errorMessage.textContent = message;
+    errorSection.style.display = 'block';
+    errorSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Hide Error
+function hideError() {
+    errorSection.style.display = 'none';
+}
+
+// Hide Results
+function hideResults() {
+    resultsSection.style.display = 'none';
+}
+
+// Demo Mode Response - For testing without backend
+async function getDemoResponse(subjectLine, copyText) {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    const subjectWordCount = countWords(subjectLine);
+    const bodyWordCount = countWords(copyText);
+    const subjectLength = subjectLine.length;
+
+    return {
+        overallScore: 72,
+        sections: [
+            {
+                title: 'Subject Line Analysis',
+                content: `Subject: "${subjectLine}" - ${subjectWordCount} words, ${subjectLength} characters`,
+                items: [
+                    subjectLength <= 50 ? '✓ Length is appropriate (under 50 characters)' : '✗ Too long - subject lines should be under 50 characters',
+                    'Could benefit from more personalization',
+                    'Consider adding curiosity or urgency element'
+                ]
+            },
+            {
+                title: 'Opening Hook',
+                content: 'The opening could be stronger to capture immediate attention.',
+                items: [
+                    'Personalization is present but generic',
+                    'Missing a clear connection to recipient\'s pain point',
+                    'Consider leading with a relevant insight or observation'
+                ]
+            },
+            {
+                title: 'Value Proposition',
+                content: 'Your value proposition needs to be clearer and more specific.',
+                highlight: {
+                    title: 'Key Improvement:',
+                    content: 'Focus on specific outcomes rather than features. Quantify the value when possible.'
+                }
+            },
+            {
+                title: 'Call to Action',
+                content: 'The CTA is clear but could be lower friction.',
+                items: [
+                    'Good: Single, clear ask',
+                    'Improve: Reduce commitment level',
+                    'Consider: Offer multiple response options'
+                ]
+            },
+            {
+                title: 'Length & Structure',
+                content: `Email body: ${bodyWordCount} words`,
+                items: [
+                    bodyWordCount >= 70 && bodyWordCount <= 95 ? '✓ Length is in the optimal range (70-95 words)' : bodyWordCount < 70 ? '⚠ Email is a bit short - aim for 70-95 words' : '⚠ Email is too long - aim for 70-95 words',
+                    'Use short paragraphs (1-2 sentences max)',
+                    'Make it skimmable in 10 seconds'
+                ]
+            },
+            {
+                title: 'Comparison to Best Performers',
+                content: 'Based on analysis of top-performing cold emails in our database:',
+                items: [
+                    'Top performers personalize using specific, recent information',
+                    'Best emails focus on one clear value prop',
+                    'High converters use low-friction CTAs like "Worth exploring?"',
+                    'Most successful emails are conversational, not formal'
+                ]
+            }
+        ]
+    };
+}
