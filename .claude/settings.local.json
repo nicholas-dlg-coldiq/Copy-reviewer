@@ -15,7 +15,11 @@
       "Bash(taskkill //F //PID 18032)",
       "Bash(taskkill //F //PID 87020)",
       "Bash(taskkill //F //PID 35144)",
-      "Bash(taskkill //F //PID 45748)"
+      "Bash(taskkill //F //PID 45748)",
+      "Bash(taskkill //F //PID 23908)",
+      "Bash(taskkill //F //PID 77212)",
+      "Bash(taskkill //F //PID 36724)",
+      "Bash(taskkill //F //PID 45732)"
     ],
     "deny": [],
     "ask": []

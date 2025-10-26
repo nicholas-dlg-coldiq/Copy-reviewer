@@ -121,26 +121,50 @@ Respond ONLY with valid JSON in this exact structure:
     "improvedBody": "<improved email body with \\n\\n between paragraphs>",
     "changes": [
         {
-            "category": "<what was changed>",
-            "reason": "<why this change improves the copy>"
+            "category": "<category name, e.g., Subject Line, Opening Hook, etc.>",
+            "issue": "<what was wrong with the original - be specific and brief>",
+            "reason": "<what you changed/fixed - describe the improvement>",
+            "why": "<why this works - include data/stats when possible, e.g., '4-7 word subjects get 2x higher opens'>",
+            "summary": "<1 short sentence (under 12 words) explaining the key change>",
+            "detail": "<2-3 sentences with deeper explanation of the change, the reasoning, and any relevant signals used (hiring, expansion, funding, etc.). Mention specific signals if applicable.>",
+            "signal": "<if a signal was used (expansion, hiring, funding, executive change, etc.), mention it here. Otherwise leave empty string>"
         }
     ],
     "furtherTips": [
-        "<specific tip for further personalization>",
-        "<tip about using real research/data>",
-        "<tip about advanced tactics from best practices>",
-        "<3-6 total actionable tips>"
+        "<most impactful tip for personalization - be specific>",
+        "<second most impactful tip about research or tactics>",
+        "<third most impactful tip from best practices>"
     ],
     "expectedImpact": "<brief summary of how this should perform better>"
 }
 
-IMPORTANT for furtherTips: Focus on ultra-specific personalization tactics like:
-- Using LinkedIn posts, company news, recent achievements for deep personalization
-- Adding specific case study names or companies for stronger social proof
-- Personalizing based on company longevity, growth stage, or tech stack
-- Including "give an out" lines to reduce pressure
-- Testing cheeky sign-offs for memorability
-- Reference specific triggers like job changes, funding, product launches`;
+IMPORTANT for changes array:
+- Keep "issue" and "reason" SHORT and punchy (under 10 words each when possible)
+- Make "why" data-driven but concise - 1-2 short sentences max
+- "summary" is what shows when collapsed - make it ultra-concise (under 12 words)
+- "detail" is what shows when expanded - 2-3 sentences with deeper reasoning
+- "signal" should mention if you used Company Growth, Hiring, Funding, Executive Change, Product Launch, Content/Social, Awards, etc.
+- Each change shows: Issue (problem) → Reason (fix) → Why (data-backed reasoning)
+- Examples:
+  - issue: "12 words, no personalization"
+  - reason: "7 words with [Company] placeholder"
+  - why: "4-7 word subjects get 2x higher opens. Personalization adds +26%."
+  - summary: "Shortened subject and added personalization placeholder"
+  - detail: "The original subject was too long at 12 words. Research shows 4-7 word subjects get 2x higher open rates, and personalization increases opens by 26%. We shortened it to 7 words and added a [Company] placeholder for easy personalization."
+  - signal: ""
+
+  - issue: "Generic greeting, no research"
+  - reason: "Specific milestone: midwest expansion"
+  - why: "Specific observations boost replies by 32% - proves you did homework."
+  - summary: "Used company expansion signal for authentic personalization"
+  - detail: "Generic greetings sound mass-sent. We leveraged a real signal - their recent midwest expansion - to show genuine research. Specific observations like this boost reply rates by 32% because they prove you're not sending the same email to thousands of people."
+  - signal: "Company Growth & Expansion"
+
+IMPORTANT for furtherTips:
+- ONLY provide exactly 3 tips (no more, no less)
+- Make each tip specific and actionable (not generic advice)
+- Focus on: ultra-specific personalization tactics, using real research/data, advanced tactics from best practices
+- Examples: LinkedIn posts, company news, specific case studies, triggers like job changes/funding, "give an out" lines`;
     }
 
     buildImproveUserPrompt(subjectLine, emailCopy, review) {

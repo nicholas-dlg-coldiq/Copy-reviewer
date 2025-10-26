@@ -431,6 +431,100 @@ P.S. Not sure it's a fit for you, but several course creators I'm working with a
         'Would I respond to this email?'
     ],
 
+    // Signals to look for (Triggers for outreach)
+    signals: [
+        {
+            signal: 'Company Growth & Expansion',
+            triggers: [
+                'New office locations or geographic expansion',
+                'Increase in employee count (check LinkedIn)',
+                'Expansion to new markets or verticals',
+                'Opening in new regions (e.g., "expanded to midwest")'
+            ],
+            why: 'Growth = new budgets, new challenges, and receptiveness to solutions',
+            example: '"Noticed you recently expanded to the midwest region. Congrats!"'
+        },
+        {
+            signal: 'Hiring Patterns',
+            triggers: [
+                'Job postings for specific roles (SDRs, AEs, engineers)',
+                'LinkedIn "We\'re hiring!" posts',
+                'Pattern of hiring in specific department',
+                'Hiring after layoffs (shift in strategy)'
+            ],
+            why: 'Hiring reveals priorities and pain points. New hires need tools/training',
+            example: '"Saw you\'re hiring 3 AEs after reducing SDR headcount - seems like shifting to AE self-sourcing?"'
+        },
+        {
+            signal: 'Funding & Financial Events',
+            triggers: [
+                'Series A/B/C funding announcements',
+                'IPO or acquisition news',
+                'Revenue milestones announced',
+                'New investor partnerships'
+            ],
+            why: 'New funding = new budgets and urgency to deploy capital for growth',
+            example: '"Congrats on the Series B! With the new capital, imagine scaling outbound is a priority..."'
+        },
+        {
+            signal: 'Executive Changes',
+            triggers: [
+                'New C-suite hire (CEO, CRO, CMO, etc.)',
+                'VP-level changes',
+                'Promotions (shows internal growth)',
+                'Departures (restructuring signals)'
+            ],
+            why: 'New execs want quick wins and evaluate all tools in first 90 days',
+            example: '"Congrats on the new VP Sales role. In your first 90 days at [PreviousCo], did you face [X]?"'
+        },
+        {
+            signal: 'Product & Tech Changes',
+            triggers: [
+                'Product launches or updates',
+                'New features announced',
+                'Tech stack changes (visible in job postings)',
+                'Platform migrations mentioned'
+            ],
+            why: 'Product changes suggest new needs and gaps in current stack',
+            example: '"Saw you just launched [Product]. How are you handling [related challenge]?"'
+        },
+        {
+            signal: 'Content & Thought Leadership',
+            triggers: [
+                'LinkedIn posts about specific challenges',
+                'Blog posts or articles they authored',
+                'Conference speaking engagements',
+                'Webinars or podcasts they participated in',
+                'Content they shared or commented on'
+            ],
+            why: 'Content reveals current priorities, pain points, and what they care about',
+            example: '"Saw your post about [topic] - couldn\'t agree more about [specific point]"'
+        },
+        {
+            signal: 'Company News & PR',
+            triggers: [
+                'Press releases',
+                'Award wins or recognitions',
+                'Partnership announcements',
+                'Customer success stories published',
+                'Industry recognition'
+            ],
+            why: 'Positive news = good mood + validates their work. Makes them receptive',
+            example: '"Congrats on being named Top Sales Coach! As a sales leader, curious how..."'
+        },
+        {
+            signal: 'Competitive & Market Signals',
+            triggers: [
+                'Competitor activity (funding, product launches)',
+                'Industry regulation changes',
+                'Market shifts affecting their space',
+                'Competitor weaknesses you can exploit'
+            ],
+            why: 'Competitive pressure creates urgency to differentiate and improve',
+            example: '"3 of your competitors recently switched from [X]. Worth exploring why?"'
+        }
+    ],
+
     // Advanced personalization tactics from Outreach Playbook
     personalizationTactics: [
         {
@@ -793,6 +887,16 @@ function getBestPracticesContext() {
             context += `- ${rule}\n`;
         });
         context += '\n';
+    });
+
+    // Add signals
+    context += '## Signals & Triggers for Personalization\n\n';
+    bestPractices.signals.forEach(signal => {
+        context += `**${signal.signal}**\n`;
+        context += 'Triggers to look for:\n';
+        signal.triggers.forEach(trigger => context += `- ${trigger}\n`);
+        context += `Why it matters: ${signal.why}\n`;
+        context += `Example: ${signal.example}\n\n`;
     });
 
     // Add frameworks

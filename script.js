@@ -11,23 +11,46 @@ const subjectCounter = document.getElementById('subjectCounter');
 const bodyCounter = document.getElementById('bodyCounter');
 const analyzeBtn = document.getElementById('analyzeBtn');
 const clearBtn = document.getElementById('clearBtn');
+const trySampleBtn = document.getElementById('trySampleBtn');
 const resultsSection = document.getElementById('resultsSection');
 const errorSection = document.getElementById('errorSection');
 const errorMessage = document.getElementById('errorMessage');
 const demoModeToggle = document.getElementById('demoModeToggle');
+const showOriginalBtn = document.getElementById('showOriginalBtn');
+const originalCopySection = document.getElementById('originalCopySection');
 
 // Result section elements
 const originalScore = document.getElementById('originalScore');
 const improvedSubject = document.getElementById('improvedSubject');
 const improvedBody = document.getElementById('improvedBody');
 const changesList = document.getElementById('changesList');
-const furtherTipsList = document.getElementById('furtherTipsList');
+const nextLevelTip = document.getElementById('nextLevelTip');
+const originalSubjectDisplay = document.getElementById('originalSubjectDisplay');
+const originalBodyDisplay = document.getElementById('originalBodyDisplay');
+
+// State
+let originalCopyVisible = false;
 
 // Event Listeners
 analyzeBtn.addEventListener('click', handleAnalyzeClick);
 clearBtn.addEventListener('click', handleClearClick);
-subjectLineInput.addEventListener('input', updateSubjectCounter);
-emailCopyTextarea.addEventListener('input', updateBodyCounter);
+trySampleBtn.addEventListener('click', handleTrySample);
+showOriginalBtn.addEventListener('click', toggleOriginalCopy);
+subjectLineInput.addEventListener('input', () => {
+    updateSubjectCounter();
+    updateButtonState();
+});
+emailCopyTextarea.addEventListener('input', () => {
+    updateBodyCounter();
+    updateButtonState();
+});
+
+// Copy buttons (delegated)
+document.addEventListener('click', (e) => {
+    if (e.target.closest('.copy-btn')) {
+        handleCopyClick(e.target.closest('.copy-btn'));
+    }
+});
 
 // Initialize counters on page load
 updateSubjectCounter();
@@ -41,12 +64,82 @@ function countWords(text) {
 
 function updateSubjectCounter() {
     const wordCount = countWords(subjectLineInput.value);
-    subjectCounter.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
+    subjectCounter.textContent = `${wordCount}/7 words (optimal: 4-7)`;
 }
 
 function updateBodyCounter() {
     const wordCount = countWords(emailCopyTextarea.value);
-    bodyCounter.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
+    bodyCounter.textContent = `${wordCount}/85 words (optimal: 70-95)`;
+}
+
+// Button State Management
+function updateButtonState() {
+    const hasSubject = subjectLineInput.value.trim().length > 0;
+    const hasBody = emailCopyTextarea.value.trim().length > 0;
+    analyzeBtn.disabled = !(hasSubject && hasBody);
+}
+
+// Sample Email Handler
+function handleTrySample() {
+    subjectLineInput.value = "I saw your post about growing your outbound team";
+    emailCopyTextarea.value = `Hey Sarah,
+
+I noticed you're hiring 3 new SDRs based on your LinkedIn post last week. Congrats on the growth!
+
+When we work with teams scaling outbound, the biggest challenge is usually ramping reps to productivity quickly. We helped TechCorp reduce ramp time from 90 to 30 days using our playbook framework.
+
+Worth exploring how this could help your new hires hit quota faster?
+
+Best,
+Alex`;
+
+    updateSubjectCounter();
+    updateBodyCounter();
+    updateButtonState();
+
+    subjectLineInput.focus();
+}
+
+// Toggle Original Copy Visibility
+function toggleOriginalCopy() {
+    originalCopyVisible = !originalCopyVisible;
+
+    if (originalCopyVisible) {
+        originalCopySection.style.display = 'block';
+        showOriginalBtn.textContent = 'Hide Original';
+    } else {
+        originalCopySection.style.display = 'none';
+        showOriginalBtn.textContent = 'Show Original';
+    }
+}
+
+// Copy to Clipboard Handler
+async function handleCopyClick(button) {
+    const copyType = button.dataset.copy;
+    let textToCopy = '';
+
+    if (copyType === 'subject') {
+        textToCopy = improvedSubject.textContent;
+    } else if (copyType === 'body') {
+        textToCopy = improvedBody.textContent;
+    }
+
+    try {
+        await navigator.clipboard.writeText(textToCopy);
+
+        // Visual feedback
+        const originalText = button.querySelector('.copy-btn-text').textContent;
+        button.classList.add('copied');
+        button.querySelector('.copy-btn-text').textContent = 'Copied!';
+
+        setTimeout(() => {
+            button.classList.remove('copied');
+            button.querySelector('.copy-btn-text').textContent = originalText;
+        }, 2000);
+    } catch (err) {
+        console.error('Failed to copy:', err);
+        showError('Failed to copy to clipboard');
+    }
 }
 
 // Handle Analyze Button Click
@@ -129,7 +222,23 @@ function displayResults(result) {
     // Display original copy score
     const score = result.review.originalScore || 0;
     originalScore.textContent = score;
-    originalScore.className = 'score-number ' + getScoreClass(score);
+
+    // Update status badge
+    const scoreStatus = document.getElementById('scoreStatus');
+    const scoreClass = getScoreClass(score);
+    const statusText = getScoreStatusText(score);
+
+    scoreStatus.textContent = statusText;
+    scoreStatus.className = 'score-status-badge ' + scoreClass;
+
+    // Display original copy (for comparison)
+    originalSubjectDisplay.textContent = result.original.subjectLine;
+    originalBodyDisplay.textContent = result.original.copy;
+
+    // Reset original copy visibility
+    originalCopyVisible = false;
+    originalCopySection.style.display = 'none';
+    showOriginalBtn.textContent = 'Show Original';
 
     // Display improved copy
     improvedSubject.textContent = result.improved.subjectLine;
@@ -138,24 +247,64 @@ function displayResults(result) {
     // The body already has \n characters, we just need to display them correctly
     improvedBody.textContent = result.improved.copy;
 
-    // Display key changes
+    // Display changes in collapsible format
     changesList.innerHTML = '';
     if (result.changes && Array.isArray(result.changes)) {
-        result.changes.forEach(change => {
-            const li = document.createElement('li');
-            li.innerHTML = `<strong>${escapeHtml(change.category)}:</strong> ${escapeHtml(change.reason)}`;
-            changesList.appendChild(li);
+        result.changes.forEach((change, index) => {
+            const changeItem = document.createElement('div');
+            changeItem.className = 'change-item';
+
+            const summary = change.summary || `${change.category} improvements`;
+            const detail = change.detail || '';
+            const signal = change.signal || '';
+
+            changeItem.innerHTML = `
+                <div class="change-header" onclick="toggleChangeDetail(this)">
+                    <div class="change-header-content">
+                        <div class="change-category">${escapeHtml(change.category)}${signal ? ` <span class="signal-badge">${escapeHtml(signal)}</span>` : ''}</div>
+                        <div class="change-summary">${escapeHtml(summary)}</div>
+                    </div>
+                    <svg class="expand-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 8 10 12 14 8"></polyline>
+                    </svg>
+                </div>
+                <div class="change-detail" style="display: none;">
+                    <div class="before-after">
+                        <div class="before-after-row">
+                            <div class="change-label before">Before:</div>
+                            <div class="change-text strikethrough">${escapeHtml(change.issue || change.before || 'Original version')}</div>
+                        </div>
+                        <div class="before-after-row">
+                            <div class="change-label after">After:</div>
+                            <div class="change-text">${escapeHtml(change.reason || change.after || change.fix)}</div>
+                        </div>
+                    </div>
+                    ${change.why ? `
+                        <div class="change-why">
+                            <span class="change-why-icon">💡</span>
+                            <span class="change-why-text">${escapeHtml(change.why)}</span>
+                        </div>
+                    ` : ''}
+                    ${detail ? `
+                        <div class="change-detail-text">
+                            ${escapeHtml(detail)}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            changesList.appendChild(changeItem);
         });
     }
 
-    // Display further improvement tips
-    furtherTipsList.innerHTML = '';
-    if (result.furtherTips && Array.isArray(result.furtherTips)) {
-        result.furtherTips.forEach(tip => {
-            const li = document.createElement('li');
-            li.textContent = tip;
-            furtherTipsList.appendChild(li);
-        });
+    // Display next level tip (just the first one as a single tip)
+    if (result.furtherTips && Array.isArray(result.furtherTips) && result.furtherTips.length > 0) {
+        nextLevelTip.innerHTML = `
+            <p><strong>💡 Next Level:</strong> ${escapeHtml(result.furtherTips[0])}</p>
+        `;
+        nextLevelTip.style.display = 'block';
+    } else {
+        nextLevelTip.style.display = 'none';
     }
 
     // Show results
@@ -172,10 +321,37 @@ function escapeHtml(text) {
 
 // Get Score Class for Styling
 function getScoreClass(score) {
-    if (score >= 80) return 'score-excellent';
-    if (score >= 60) return 'score-good';
-    if (score >= 40) return 'score-fair';
-    return 'score-poor';
+    if (score >= 80) return 'excellent';
+    if (score >= 60) return 'good';
+    if (score >= 40) return 'fair';
+    return 'poor';
+}
+
+// Get Score Status Text
+function getScoreStatusText(score) {
+    if (score >= 80) return 'Excellent';
+    if (score >= 60) return 'Good';
+    if (score >= 40) return 'Needs Work';
+    return 'High Risk';
+}
+
+// Toggle Change Detail
+function toggleChangeDetail(headerElement) {
+    const changeItem = headerElement.closest('.change-item');
+    const detailElement = changeItem.querySelector('.change-detail');
+    const expandIcon = headerElement.querySelector('.expand-icon');
+
+    const isExpanded = detailElement.style.display === 'block';
+
+    if (isExpanded) {
+        detailElement.style.display = 'none';
+        changeItem.classList.remove('expanded');
+        expandIcon.style.transform = 'rotate(0deg)';
+    } else {
+        detailElement.style.display = 'block';
+        changeItem.classList.add('expanded');
+        expandIcon.style.transform = 'rotate(180deg)';
+    }
 }
 
 // Set Loading State
@@ -241,36 +417,54 @@ async function getDemoResponse(subjectLine, copyText) {
         changes: [
             {
                 category: "Subject Line",
-                reason: "Shortened from 12 to 7 words and added personalization placeholder for immediate relevance"
+                issue: "12 words, no personalization",
+                reason: "7 words with [Company] placeholder",
+                why: "4-7 word subjects get 2x higher opens. Personalization adds +26% open rate.",
+                summary: "Shortened subject and added personalization placeholder",
+                detail: "The original subject was too long at 12 words, making it likely to get cut off on mobile. Research shows 4-7 word subjects get 2x higher open rates. We also added a [Company] placeholder to make personalization easy - personalization increases opens by 26%.",
+                signal: ""
             },
             {
                 category: "Opening Hook",
-                reason: "Replaced generic greeting with specific, recent company observation to show genuine research"
+                issue: "Generic greeting, no research",
+                reason: "Specific milestone: midwest expansion",
+                why: "Specific observations boost replies by 32% - proves you did homework.",
+                summary: "Used company expansion signal for authentic personalization",
+                detail: "Generic greetings like 'Hope this finds you well' sound mass-sent and get ignored. We leveraged a real signal - their recent midwest expansion - to show genuine research. Specific observations like this boost reply rates by 32% because they prove you're not blasting the same email to thousands of people. Look for growth signals like office openings, new markets, or headcount increases.",
+                signal: "Company Growth & Expansion"
             },
             {
                 category: "Value Proposition",
-                reason: "Added concrete metric (40% reduction, 90→54 days) instead of vague benefit claims"
-            },
-            {
-                category: "Social Proof",
-                reason: "Referenced similar company success to build credibility without being salesy"
+                issue: "Vague claims, no proof",
+                reason: "Concrete metric: 40% faster, 90→54 days",
+                why: "Numbers are 3x more credible. Specific results = tangible ROI.",
+                summary: "Added specific numbers to make value tangible",
+                detail: "Vague claims like 'We help you save time' don't resonate - everyone says that. We added concrete numbers: 40% reduction and exact day counts (90→54 days). Specific metrics are 3x more credible than generic claims because prospects can visualize the exact improvement and calculate ROI for their situation.",
+                signal: ""
             },
             {
                 category: "Call to Action",
-                reason: "Changed from 'Schedule a call' to low-friction 'Worth a quick chat?' - reduces perceived commitment"
+                issue: "High-friction 'Schedule a call'",
+                reason: "'Worth a quick chat?' - question format",
+                why: "Low-friction CTAs get 40% more yes replies. Questions > commands.",
+                summary: "Softened CTA to reduce commitment fear",
+                detail: "'Schedule a call' feels like a big commitment and triggers resistance. We changed it to 'Worth a quick chat?' which is a low-friction question format. Questions feel collaborative rather than demanding, and this phrasing gets 40% more positive responses. The word 'quick' further reduces perceived time investment.",
+                signal: ""
             },
             {
                 category: "Length",
-                reason: `Optimized from ${bodyWordCount} to 73 words - hitting the sweet spot for cold emails`
+                issue: `${bodyWordCount} words`,
+                reason: "73 words total",
+                why: "70-95 words = sweet spot for cold emails. Respects their time.",
+                summary: "Optimized to ideal cold email length",
+                detail: "Cold emails over 100 words see sharp drop-offs in response rates. Prospects spend less than 10 seconds scanning cold emails. The 70-95 word range is the proven sweet spot - long enough to convey value, short enough to respect their time. Every word must earn its place.",
+                signal: ""
             }
         ],
         furtherTips: [
-            "Replace [Name] and [Company] with actual, specific research about the prospect (LinkedIn posts, company news, recent achievements)",
-            "Make the opening line even more specific - reference exact details like 'opened Chicago office last month' instead of 'midwest region'",
-            "Add a specific case study name or company for stronger social proof instead of 'similar SaaS company'",
-            "Personalize based on time business was founded - presidents/owners are proud of longevity",
-            "Consider adding a 'give an out' line like 'No worries if timing isn't right' to reduce pressure",
-            "Test a cheeky sign-off that shows personality - could boost memorability and response rates"
+            "Replace [Name] and [Company] with actual research about the prospect - reference their LinkedIn posts, company news, or recent achievements for authentic personalization",
+            "Make the opening line ultra-specific - use exact details like 'opened Chicago office last month' instead of generic 'midwest region' to show real research",
+            "Add a specific case study name or company for stronger social proof - 'similar SaaS company' sounds vague, name-drop when possible to build credibility"
         ]
     };
 }

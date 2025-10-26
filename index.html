@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cold Email Copy Reviewer</title>
+    <title>Cold Email Optimizer</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,15 +11,18 @@
         <div class="copy-reviewer">
             <div class="header-section">
                 <div>
-                    <h1 class="title">Copy Reviewer</h1>
+                    <h1 class="title">Cold Email Optimizer</h1>
                     <p class="subtitle">Ship emails that land.</p>
                 </div>
-                <div class="demo-toggle">
-                    <label class="toggle-label">
-                        <input type="checkbox" id="demoModeToggle" checked>
-                        <span class="toggle-slider"></span>
-                        <span class="toggle-text">Demo Mode</span>
-                    </label>
+                <div class="header-actions">
+                    <button id="trySampleBtn" class="btn-sample">Try Sample</button>
+                    <div class="demo-toggle">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="demoModeToggle" checked>
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-text">Demo Mode</span>
+                        </label>
+                    </div>
                 </div>
             </div>
 
@@ -27,13 +30,13 @@
                 <div class="input-group">
                     <div class="label-with-counter">
                         <label for="subjectLine" class="label">Subject Line <span class="required">*</span></label>
-                        <span id="subjectCounter" class="counter">0 words</span>
+                        <span id="subjectCounter" class="counter">0/7 words (optimal: 4-7)</span>
                     </div>
                     <input
                         type="text"
                         id="subjectLine"
                         class="input"
-                        placeholder="Enter your email subject line..."
+                        placeholder="e.g., Quick question about [Company]'s sales process"
                         required
                     />
                 </div>
@@ -41,68 +44,106 @@
                 <div class="input-group">
                     <div class="label-with-counter">
                         <label for="emailCopy" class="label">Email Body <span class="required">*</span></label>
-                        <span id="bodyCounter" class="counter">0 words</span>
+                        <span id="bodyCounter" class="counter">0/85 words (optimal: 70-95)</span>
                     </div>
                     <textarea
                         id="emailCopy"
                         class="textarea"
-                        placeholder="Paste your cold email body here...&#10;&#10;Include:&#10;- Opening hook&#10;- Value proposition&#10;- Call to action"
+                        placeholder="e.g., Hey [Name],&#10;&#10;Noticed you recently expanded to the midwest region. Congrats!&#10;&#10;We helped a similar SaaS company reduce their sales cycle by 40%. They went from 90 to 54 days average close time.&#10;&#10;Worth a quick chat to see if this applies to your team?"
                         rows="12"
                         required
                     ></textarea>
                 </div>
 
                 <div class="button-group">
-                    <button id="analyzeBtn" class="btn btn-primary">
+                    <button id="analyzeBtn" class="btn btn-primary" disabled>
                         <span class="btn-text">Improve My Copy</span>
                         <span class="btn-loader" style="display: none;">
                             <svg class="spinner" viewBox="0 0 50 50">
                                 <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
                             </svg>
+                            <span class="loading-text">Analyzing... (5-10 sec)</span>
                         </span>
                     </button>
-                    <button id="clearBtn" class="btn btn-secondary">Clear</button>
+                    <button id="clearBtn" class="btn btn-link">Clear</button>
                 </div>
             </div>
 
             <div id="resultsSection" class="results-section" style="display: none;">
-                <div class="score-header">
-                    <div class="score-badge">
-                        <span class="score-label">Your Copy Score</span>
-                        <span id="originalScore" class="score-number">0</span>
+                <!-- Score Card -->
+                <div class="score-card">
+                    <h3 class="score-card-title">Copy Quality Score</h3>
+                    <div class="score-card-content">
+                        <div class="score-display">
+                            <span id="originalScore" class="score-big-number">0</span>
+                            <span class="score-denominator">/100</span>
+                        </div>
+                        <div id="scoreStatus" class="score-status-badge">Needs Improvement</div>
                     </div>
                 </div>
 
                 <div class="improved-copy-section">
                     <div class="section-header">
                         <h3 class="section-title">Optimized Copy</h3>
+                        <button id="showOriginalBtn" class="btn-text-link">Show Original</button>
+                    </div>
+
+                    <!-- Original Copy (Collapsible) -->
+                    <div id="originalCopySection" class="original-copy-section" style="display: none;">
+                        <div class="copy-container original-container">
+                            <div class="copy-field">
+                                <label class="field-label-secondary">Original Subject Line</label>
+                                <div id="originalSubjectDisplay" class="copy-display-secondary"></div>
+                            </div>
+                            <div class="copy-field">
+                                <label class="field-label-secondary">Original Email Body</label>
+                                <div id="originalBodyDisplay" class="copy-display-secondary body-display"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="copy-container">
                         <div class="copy-field">
-                            <label class="field-label">Subject Line</label>
+                            <div class="field-header">
+                                <label class="field-label">Subject Line</label>
+                                <button class="copy-btn" data-copy="subject" title="Copy to clipboard">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                    </svg>
+                                    <span class="copy-btn-text">Copy</span>
+                                </button>
+                            </div>
                             <div id="improvedSubject" class="copy-display"></div>
                         </div>
 
                         <div class="copy-field">
-                            <label class="field-label">Email Body</label>
+                            <div class="field-header">
+                                <label class="field-label">Email Body</label>
+                                <button class="copy-btn" data-copy="body" title="Copy to clipboard">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                    </svg>
+                                    <span class="copy-btn-text">Copy</span>
+                                </button>
+                            </div>
                             <div id="improvedBody" class="copy-display body-display"></div>
                         </div>
                     </div>
                 </div>
 
-                <div class="improvements-section">
-                    <h3 class="improvements-title">Key Improvements</h3>
-                    <ul id="changesList" class="improvements-list">
-                        <!-- Changes will be inserted here -->
-                    </ul>
-                </div>
+                <div class="changes-section">
+                    <h3 class="section-title">What We Changed & Why</h3>
+                    <div class="changes-container">
+                        <div id="changesList" class="changes-list">
+                            <!-- Changes will be inserted here -->
+                        </div>
 
-                <div class="further-improvements-section">
-                    <h3 class="improvements-title">How to Improve Further</h3>
-                    <ul id="furtherTipsList" class="improvements-list">
-                        <!-- Further improvement tips will be inserted here -->
-                    </ul>
+                        <div id="nextLevelTip" class="next-level-tip" style="display: none;">
+                            <!-- Next level tip will be inserted here -->
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -116,6 +157,10 @@
                     <p id="errorMessage" class="error-message"></p>
                 </div>
             </div>
+
+            <footer class="footer">
+                <p class="footer-text">Powered by <a href="https://coldiq.com" target="_blank" class="footer-link">ColdIQ</a></p>
+            </footer>
         </div>
     </div>
 
