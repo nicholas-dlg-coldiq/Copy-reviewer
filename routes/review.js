@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const aiService = require('../services/aiService');
 
+// Helper function to format time in both ms and seconds
+function formatTime(ms) {
+    return `${ms}ms (${(ms / 1000).toFixed(2)}s)`;
+}
+
 // POST /api/review-copy
 router.post('/review-copy', async (req, res) => {
     try {
@@ -107,31 +112,18 @@ router.post('/analyze-and-improve', async (req, res) => {
         const selectedModel = model || 'claude-sonnet-4-5-20250929';
         console.log(`Using model: ${selectedModel}`);
 
-        // Create a new session for this review+improve pair
+        // Create a new session for this combined analyze+improve
         const sessionId = aiService.createSession();
         console.log(`Session created: ${sessionId}`);
 
-        // Step 1: Get review from AI service
-        console.log('[Step 1/2] Starting REVIEW API call...');
-        const reviewStartTime = Date.now();
-        const review = await aiService.reviewCopy(subjectLine, copy, selectedModel);
-        const reviewDuration = Date.now() - reviewStartTime;
-        console.log(`[Step 1/2] REVIEW completed in ${reviewDuration}ms`);
-        console.log(`Total elapsed time: ${Date.now() - requestStartTime}ms\n`);
-
-        // Step 2: Get improved copy from AI service
-        console.log('[Step 2/2] Starting IMPROVE API call...');
-        const improveStartTime = Date.now();
-        const improvedCopy = await aiService.improveCopy(subjectLine, copy, review, selectedModel);
-        const improveDuration = Date.now() - improveStartTime;
-        console.log(`[Step 2/2] IMPROVE completed in ${improveDuration}ms`);
+        // Single combined API call
+        console.log('Starting COMBINED analyze-and-improve API call...');
+        const result = await aiService.analyzeAndImprove(subjectLine, copy, selectedModel);
 
         const totalDuration = Date.now() - requestStartTime;
         console.log('\n========================================');
         console.log('REQUEST COMPLETED SUCCESSFULLY');
-        console.log(`Review took: ${reviewDuration}ms`);
-        console.log(`Improve took: ${improveDuration}ms`);
-        console.log(`Total request time: ${totalDuration}ms`);
+        console.log(`Total request time: ${formatTime(totalDuration)}`);
         console.log('Completed at:', new Date().toISOString());
         console.log('========================================\n');
 
@@ -142,23 +134,23 @@ router.post('/analyze-and-improve', async (req, res) => {
                 copy
             },
             review: {
-                score: review.overallScore,
-                originalScore: review.overallScore
+                score: result.overallScore,
+                originalScore: result.overallScore
             },
             improved: {
-                subjectLine: improvedCopy.improvedSubject,
-                copy: improvedCopy.improvedBody,
-                score: Math.min(100, review.overallScore + 15) // Estimated improvement
+                subjectLine: result.improvedSubject,
+                copy: result.improvedBody,
+                score: Math.min(100, result.overallScore + 15) // Estimated improvement
             },
-            changes: improvedCopy.changes || [],
-            furtherTips: improvedCopy.furtherTips || [],
-            expectedImpact: improvedCopy.expectedImpact
+            changes: result.changes || [],
+            furtherTips: result.furtherTips || [],
+            expectedImpact: result.expectedImpact
         });
     } catch (error) {
         const totalDuration = Date.now() - requestStartTime;
         console.error('\n========================================');
         console.error('REQUEST FAILED');
-        console.error(`Total time before error: ${totalDuration}ms`);
+        console.error(`Total time before error: ${formatTime(totalDuration)}`);
         console.error('Error:', error.message);
         console.error('Failed at:', new Date().toISOString());
         console.error('========================================\n');

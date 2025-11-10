@@ -1,7 +1,7 @@
 // API Configuration
 const API_CONFIG = {
     endpoint: '/api/analyze-and-improve',
-    timeout: 120000 // 120 seconds (2 minutes) for combined operation - two sequential API calls
+    timeout: 90000 // 90 seconds for single combined API call (faster than two sequential calls)
 };
 
 // DOM Elements
@@ -84,6 +84,32 @@ document.addEventListener('click', (e) => {
 // Initialize counters on page load
 updateSubjectCounter();
 updateBodyCounter();
+
+// Load configuration and apply admin panel visibility
+async function loadConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+
+        // Show or hide admin panel (settings button) based on config
+        if (!config.showAdminPanel) {
+            settingsBtn.style.display = 'none';
+
+            // Set production defaults when admin panel is hidden
+            // Use Claude 3.5 Sonnet via OpenRouter
+            modelSelectModal.value = 'anthropic/claude-3.5-sonnet';
+
+            // Disable demo mode (use real API calls)
+            demoModeToggleModal.checked = false;
+        }
+    } catch (error) {
+        console.error('Failed to load configuration:', error);
+        // On error, keep admin panel visible (fail-open for development)
+    }
+}
+
+// Load config on page load
+loadConfig();
 
 // Settings Modal Functions
 function openSettings() {
@@ -220,7 +246,7 @@ async function handleCopyClick(button) {
         setTimeout(() => {
             button.classList.remove('copied');
             button.querySelector('.copy-btn-text').textContent = originalText;
-        }, 2000);
+        }, 500);
     } catch (err) {
         console.error('Failed to copy:', err);
         showError('Failed to copy to clipboard');
@@ -561,9 +587,7 @@ function hideResults() {
 
 // Demo Mode Response - For testing without backend
 async function getDemoResponse(subjectLine, copyText) {
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
+    // No artificial delay - return instantly
     const bodyWordCount = countWords(copyText);
 
     return {

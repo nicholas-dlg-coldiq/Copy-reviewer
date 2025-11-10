@@ -1,12 +1,37 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const bestPerformingCopies = require('../data/bestPerformingCopies');
-const { getBestPracticesContext } = require('../data/bestPractices');
-const fs = require('fs');
+const { getBestPracticesContext, getComprehensivePrompt } = require('../data/bestPractices');
+const fsPromises = require('fs').promises;
 const path = require('path');
+
+// Helper function to format time in both ms and seconds
+function formatTime(ms) {
+    return `${ms}ms (${(ms / 1000).toFixed(2)}s)`;
+}
 
 class AIService {
     constructor() {
-        this.provider = process.env.AI_PROVIDER || 'claude';
+        // Load environment configuration
+        this.enableFileLogging = process.env.ENABLE_FILE_LOGGING !== 'false'; // Default true
+        this.enableConsoleLogs = process.env.ENABLE_CONSOLE_LOGS !== 'false'; // Default true
+        this.logDetailedPrompts = process.env.LOG_DETAILED_PROMPTS !== 'false'; // Default true
+
+        // Validate and set AI provider
+        this.provider = process.env.AI_PROVIDER || 'anthropic';
+
+        // Validate that required API keys are present based on provider
+        if (this.provider === 'anthropic' || this.provider === 'claude') {
+            if (!process.env.ANTHROPIC_API_KEY) {
+                throw new Error('ANTHROPIC_API_KEY environment variable is required when using Anthropic/Claude provider');
+            }
+            this.provider = 'claude'; // Normalize to 'claude'
+        } else if (this.provider === 'openrouter') {
+            if (!process.env.OPENROUTER_API_KEY) {
+                throw new Error('OPENROUTER_API_KEY environment variable is required when using OpenRouter provider');
+            }
+        } else {
+            throw new Error(`Invalid AI_PROVIDER: ${this.provider}. Must be 'anthropic' or 'openrouter'`);
+        }
 
         // Initialize Claude if using it
         if (this.provider === 'claude') {
@@ -22,15 +47,117 @@ class AIService {
             this.openRouterUrl = 'https://openrouter.ai/api/v1/chat/completions';
         }
 
-        // Create logs directory if it doesn't exist
-        this.logsDir = path.join(__dirname, '..', 'logs');
-        if (!fs.existsSync(this.logsDir)) {
-            fs.mkdirSync(this.logsDir, { recursive: true });
+        // Create logs directory if it doesn't exist (async, non-blocking)
+        // Only if file logging is enabled
+        if (this.enableFileLogging) {
+            this.logsDir = path.join(__dirname, '..', 'logs');
+            this.ensureLogsDir();
         }
 
         // Session tracking for linking review + improve
         this.currentSessionId = null;
         this.sessionData = {};
+
+        // Log configuration on startup (if console logs enabled)
+        if (this.enableConsoleLogs) {
+            console.log('AIService initialized with configuration:');
+            console.log(`  - Provider: ${this.provider}`);
+            console.log(`  - File Logging: ${this.enableFileLogging ? 'Enabled' : 'Disabled'}`);
+            console.log(`  - Console Logs: ${this.enableConsoleLogs ? 'Enabled' : 'Disabled'}`);
+            console.log(`  - Detailed Prompts: ${this.logDetailedPrompts ? 'Enabled' : 'Disabled'}`);
+        }
+    }
+
+    // Async helper to ensure logs directory exists (non-blocking)
+    async ensureLogsDir() {
+        try {
+            await fsPromises.mkdir(this.logsDir, { recursive: true });
+        } catch (error) {
+            // Directory might already exist, ignore
+        }
+    }
+
+    // Async helper to ensure session directory exists (non-blocking)
+    async ensureSessionDir(sessionDir) {
+        try {
+            await fsPromises.mkdir(sessionDir, { recursive: true });
+        } catch (error) {
+            // Directory might already exist, ignore
+        }
+    }
+
+    // Validate API key for a given provider
+    validateApiKey(provider) {
+        if (provider === 'claude' || provider === 'anthropic') {
+            const key = process.env.ANTHROPIC_API_KEY;
+            if (!key || key === 'your-anthropic-key-here' || key.trim().length === 0) {
+                throw new Error(
+                    `AI_PROVIDER is set to '${this.provider}' but ANTHROPIC_API_KEY is missing or set to placeholder value. ` +
+                    `Please set a valid Anthropic API key in your .env file, or change AI_PROVIDER to 'openrouter'.`
+                );
+            }
+        } else if (provider === 'openrouter') {
+            const key = process.env.OPENROUTER_API_KEY;
+            if (!key || key.trim().length === 0) {
+                throw new Error(
+                    `AI_PROVIDER is set to 'openrouter' but OPENROUTER_API_KEY is missing. ` +
+                    `Please set a valid OpenRouter API key in your .env file.`
+                );
+            }
+        }
+    }
+
+    // Normalize model name based on provider
+    normalizeModelName(modelName, provider) {
+        if (!modelName) return null;
+
+        // If using direct Anthropic, strip "anthropic/" prefix and use Anthropic-native model names
+        if (provider === 'claude' || provider === 'anthropic') {
+            // Remove "anthropic/" prefix if present
+            let normalized = modelName.replace(/^anthropic\//, '');
+
+            // Map common OpenRouter model names to Anthropic native names
+            const modelMappings = {
+                'claude-3.5-sonnet': 'claude-3-5-sonnet-20241022',
+                'claude-3-sonnet': 'claude-3-sonnet-20240229',
+                'claude-3-opus': 'claude-3-opus-20240229',
+                'claude-3-haiku': 'claude-3-haiku-20240307',
+                'claude-sonnet-4-5': 'claude-sonnet-4-5-20250929',
+                'claude-sonnet-4-5:beta': 'claude-sonnet-4-5-20250929'
+            };
+
+            return modelMappings[normalized] || normalized;
+        }
+
+        // For OpenRouter, keep the model name as-is
+        return modelName;
+    }
+
+    // Determine which provider to use based on configuration and model name
+    determineProvider(modelName) {
+        // Priority 1: Explicit AI_PROVIDER setting (respect user configuration)
+        if (this.provider) {
+            if (this.enableConsoleLogs) {
+                console.log(`Using explicit AI_PROVIDER setting: ${this.provider}`);
+            }
+            return this.provider;
+        }
+
+        // Priority 2: Auto-detect based on model name format
+        // If model has "/" it's likely an OpenRouter model (e.g., "anthropic/claude-3.5-sonnet", "openai/gpt-4o")
+        if (modelName && modelName.includes('/')) {
+            if (this.enableConsoleLogs) {
+                console.log(`Auto-detected OpenRouter provider from model name: ${modelName}`);
+            }
+            return 'openrouter';
+        }
+
+        // Priority 3: Default to configured provider or claude
+        const defaultProvider = this.provider || 'claude';
+        if (this.enableConsoleLogs) {
+            console.log(`Using default provider: ${defaultProvider}`);
+        }
+        return defaultProvider;
     }
 
     createSession() {
@@ -43,41 +170,68 @@ class AIService {
             improve: null
         };
 
-        // Create session directory
-        const sessionDir = path.join(this.logsDir, this.currentSessionId);
-        if (!fs.existsSync(sessionDir)) {
-            fs.mkdirSync(sessionDir, { recursive: true });
+        // Create session directory asynchronously (fire-and-forget) only if logging is enabled
+        if (this.enableFileLogging && this.logsDir) {
+            const sessionDir = path.join(this.logsDir, this.currentSessionId);
+            this.ensureSessionDir(sessionDir).catch(err => console.error('Failed to create session dir:', err));
         }
 
         return this.currentSessionId;
     }
 
     logPromptAndResponse(type, data) {
-        try {
-            if (!this.currentSessionId) {
-                this.createSession();
+        // Only log if file logging is enabled
+        if (!this.enableFileLogging) {
+            return;
+        }
+
+        // Fire-and-forget async logging - don't block the response
+        this._logPromptAndResponseAsync(type, data).catch(err => {
+            if (this.enableConsoleLogs) {
+                console.error('Failed to log prompt/response:', err.message);
             }
+        });
+    }
 
-            const sessionDir = path.join(this.logsDir, this.currentSessionId);
+    async _logPromptAndResponseAsync(type, data) {
+        if (!this.currentSessionId) {
+            this.createSession();
+        }
 
-            // Store data for session summary
-            if (type === 'review') {
-                this.sessionData.review = {
-                    ...data,
-                    timestamp: new Date().toISOString()
-                };
-            } else if (type === 'improve') {
-                this.sessionData.improve = {
-                    ...data,
-                    timestamp: new Date().toISOString()
-                };
-            }
+        // Safety check: ensure logsDir exists (should be set if file logging is enabled)
+        if (!this.logsDir) {
+            console.error('Warning: logsDir is not set but logging was attempted');
+            return;
+        }
 
-            // Write detailed log file
-            const filename = `${type}_detailed.log`;
-            const filepath = path.join(sessionDir, filename);
+        const sessionDir = path.join(this.logsDir, this.currentSessionId);
 
-            const logContent = `
+        // Ensure session directory exists
+        await this.ensureSessionDir(sessionDir);
+
+        // Store data for session summary
+        if (type === 'review') {
+            this.sessionData.review = {
+                ...data,
+                timestamp: new Date().toISOString()
+            };
+        } else if (type === 'improve') {
+            this.sessionData.improve = {
+                ...data,
+                timestamp: new Date().toISOString()
+            };
+        }
+
+        // Write detailed log file asynchronously
+        const filename = `${type}_detailed.log`;
+        const filepath = path.join(sessionDir, filename);
+
+        // Build log content based on LOG_DETAILED_PROMPTS setting
+        let logContent;
+
+        if (this.logDetailedPrompts) {
+            // Full detailed log with prompts and responses
+            logContent = `
 ================================================================================
 ${type.toUpperCase()} LOG
 Generated: ${new Date().toISOString()}
@@ -116,20 +270,44 @@ Stop Reason: ${data.stopReason}
 Content Length: ${data.contentLength} characters
 ${'-'.repeat(80)}
 `;
+        } else {
+            // Minimal log with only metadata (no prompts/responses to reduce log size)
+            logContent = `
+================================================================================
+${type.toUpperCase()} LOG (Summary Only)
+Generated: ${new Date().toISOString()}
+================================================================================
 
-            fs.writeFileSync(filepath, logContent, 'utf8');
+${data.parsedResponse ? `PARSED RESPONSE:
+${'-'.repeat(80)}
+${JSON.stringify(data.parsedResponse, null, 2)}
+${'-'.repeat(80)}
+
+` : ''}METADATA:
+${'-'.repeat(80)}
+Model: ${data.model}
+Response Time: ${data.responseTime}ms
+Stop Reason: ${data.stopReason}
+Content Length: ${data.contentLength} characters
+${'-'.repeat(80)}
+
+NOTE: Detailed prompts/responses disabled (set LOG_DETAILED_PROMPTS=true to enable)
+`;
+        }
+
+        await fsPromises.writeFile(filepath, logContent, 'utf8');
+
+        if (this.enableConsoleLogs) {
             console.log(`✓ ${type} logged to: logs/${this.currentSessionId}/${filename}`);
+        }
 
-            // Generate session summary if both review and improve are complete
-            if (this.sessionData.review && this.sessionData.improve) {
-                this.generateSessionSummary();
-            }
-        } catch (error) {
-            console.error('Failed to log prompt/response:', error.message);
+        // Generate session summary if both review and improve are complete
+        if (this.sessionData.review && this.sessionData.improve) {
+            await this.generateSessionSummary();
         }
     }
 
-    generateSessionSummary() {
+    async generateSessionSummary() {
         try {
             const sessionDir = path.join(this.logsDir, this.currentSessionId);
             const summaryPath = path.join(sessionDir, 'SUMMARY.md');
@@ -177,7 +355,6 @@ ${inputBody}
 **Model:** ${reviewData.model}
 **Time:** ${reviewData.responseTime}ms
 **Stop Reason:** ${reviewData.stopReason}
-**Cache Used:** ${reviewData.systemPrompt.includes('cache_control') ? 'Yes' : 'No'}
 
 ### Key Issues Identified
 ${keyIssues}
@@ -216,7 +393,6 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
 | **Model** | ${reviewData.model} | ${improveData.model} | - |
 | **Response Length** | ${reviewData.contentLength} chars | ${improveData.contentLength} chars | ${reviewData.contentLength + improveData.contentLength} chars |
 | **Stop Reason** | ${reviewData.stopReason} | ${improveData.stopReason} | - |
-| **Prompt Cache** | Yes (ephemeral) | Yes (ephemeral) | - |
 
 ---
 
@@ -231,7 +407,7 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
 *Generated by Copy Reviewer AI*
 `;
 
-            fs.writeFileSync(summaryPath, summary, 'utf8');
+            await fsPromises.writeFile(summaryPath, summary, 'utf8');
             console.log(`✓ Session summary generated: logs/${this.currentSessionId}/SUMMARY.md`);
         } catch (error) {
             console.error('Failed to generate session summary:', error.message);
@@ -276,34 +452,82 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
         return improveResponse.furtherTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n');
     }
 
-    async reviewCopy(subjectLine, emailCopy, model) {
-        // Auto-detect provider based on model name format
-        // If model has "/" it's an OpenRouter model (e.g., "anthropic/claude-3.5-sonnet", "openai/gpt-4o")
-        const useOpenRouter = model && model.includes('/');
+    estimateTokenCount(text) {
+        // Rough approximation: ~4 characters per token
+        return Math.ceil(text.length / 4);
+    }
 
-        if (useOpenRouter || this.provider === 'openrouter') {
-            return await this.reviewWithOpenRouter(subjectLine, emailCopy, model);
-        } else if (this.provider === 'claude') {
-            return await this.reviewWithClaude(subjectLine, emailCopy, model);
-        } else if (this.provider === 'openai') {
+
+    async analyzeAndImprove(subjectLine, emailCopy, model) {
+        // Determine which provider to use (respects AI_PROVIDER setting first)
+        const provider = this.determineProvider(model);
+
+        // Validate that the required API key exists for this provider
+        this.validateApiKey(provider);
+
+        // Normalize model name for the selected provider
+        const normalizedModel = this.normalizeModelName(model, provider);
+
+        if (this.enableConsoleLogs) {
+            console.log(`Provider determination: ${provider}`);
+            console.log(`Original model: ${model}`);
+            console.log(`Normalized model: ${normalizedModel}`);
+        }
+
+        // Route to the appropriate provider implementation
+        if (provider === 'openrouter') {
+            return await this.analyzeAndImproveWithOpenRouter(subjectLine, emailCopy, normalizedModel || model);
+        } else if (provider === 'claude' || provider === 'anthropic') {
+            return await this.analyzeAndImproveWithClaude(subjectLine, emailCopy, normalizedModel || model);
+        } else {
+            throw new Error(`Invalid AI provider specified: ${provider}`);
+        }
+    }
+
+    async reviewCopy(subjectLine, emailCopy, model) {
+        // Determine which provider to use (respects AI_PROVIDER setting first)
+        const provider = this.determineProvider(model);
+
+        // Validate that the required API key exists for this provider
+        this.validateApiKey(provider);
+
+        // Normalize model name for the selected provider
+        const normalizedModel = this.normalizeModelName(model, provider);
+
+        if (this.enableConsoleLogs) {
+            console.log(`Provider determination: ${provider}`);
+            console.log(`Original model: ${model}`);
+            console.log(`Normalized model: ${normalizedModel}`);
+        }
+
+        // Route to the appropriate provider implementation
+        if (provider === 'openrouter') {
+            return await this.reviewWithOpenRouter(subjectLine, emailCopy, normalizedModel || model);
+        } else if (provider === 'claude' || provider === 'anthropic') {
+            return await this.reviewWithClaude(subjectLine, emailCopy, normalizedModel || model);
+        } else if (provider === 'openai') {
             return await this.reviewWithOpenAI(subjectLine, emailCopy);
         } else {
-            throw new Error('Invalid AI provider specified');
+            throw new Error(`Invalid AI provider specified: ${provider}`);
         }
     }
 
     async reviewWithClaude(subjectLine, emailCopy, model = 'claude-sonnet-4-5-20250929') {
-        const systemPrompt = this.buildSystemPrompt();
+        const systemPromptBlocks = this.buildSystemPromptBlocks();
         const userPrompt = this.buildUserPrompt(subjectLine, emailCopy);
 
-        console.log('=== Starting Claude API Request (Review) ===');
-        console.log('Model:', model);
-        console.log('Subject Line Length:', subjectLine.length);
-        console.log('Email Copy Length:', emailCopy.length);
-        console.log('System Prompt Length:', systemPrompt.length);
-        console.log('User Prompt Length:', userPrompt.length);
-        console.log('Timeout: 60000ms');
-        console.log('Request started at:', new Date().toISOString());
+        const totalSystemPromptLength = systemPromptBlocks.reduce((sum, block) => sum + block.text.length, 0);
+
+        if (this.enableConsoleLogs) {
+            console.log('=== Starting Claude API Request (Review) ===');
+            console.log('Model:', model);
+            console.log('Subject Line Length:', subjectLine.length);
+            console.log('Email Copy Length:', emailCopy.length);
+            console.log('System Prompt Length:', totalSystemPromptLength);
+            console.log('User Prompt Length:', userPrompt.length);
+            console.log('Timeout: 60000ms');
+            console.log('Request started at:', new Date().toISOString());
+        }
 
         try {
             const startTime = Date.now();
@@ -311,13 +535,7 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
                 model: model,
                 max_tokens: 3000, // Optimized for concise responses
                 temperature: 0.7,
-                system: [
-                    {
-                        type: "text",
-                        text: systemPrompt,
-                        cache_control: { type: "ephemeral" } // Cache system prompt for 5 minutes
-                    }
-                ],
+                system: systemPromptBlocks,
                 messages: [
                     {
                         role: 'user',
@@ -331,11 +549,13 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
             });
             const duration = Date.now() - startTime;
 
-            console.log('=== Claude API Response Received ===');
-            console.log('Response time:', duration + 'ms');
-            console.log('Response completed at:', new Date().toISOString());
-            console.log('Response content length:', message.content[0].text.length);
-            console.log('Stop reason:', message.stop_reason);
+            if (this.enableConsoleLogs) {
+                console.log('=== Claude API Response Received ===');
+                console.log('Response time:', formatTime(duration));
+                console.log('Response completed at:', new Date().toISOString());
+                console.log('Response content length:', message.content[0].text.length);
+                console.log('Stop reason:', message.stop_reason);
+            }
 
             // Check if response was cut off
             if (message.stop_reason === 'max_tokens') {
@@ -347,8 +567,9 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
             const parsedResponse = this.parseAIResponse(responseText);
 
             // Log the prompt and response
+            const systemPromptText = systemPromptBlocks.map(block => block.text).join('\n\n');
             this.logPromptAndResponse('review', {
-                systemPrompt,
+                systemPrompt: systemPromptText,
                 userPrompt,
                 response: responseText,
                 parsedResponse,
@@ -384,16 +605,20 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
     }
 
     async reviewWithOpenRouter(subjectLine, emailCopy, model = 'anthropic/claude-sonnet-4-5:beta') {
-        const systemPrompt = this.buildSystemPrompt();
+        const systemPromptBlocks = this.buildSystemPromptBlocks();
         const userPrompt = this.buildUserPrompt(subjectLine, emailCopy);
 
-        console.log('=== Starting OpenRouter API Request (Review) ===');
-        console.log('Model:', model);
-        console.log('Subject Line Length:', subjectLine.length);
-        console.log('Email Copy Length:', emailCopy.length);
-        console.log('System Prompt Length:', systemPrompt.length);
-        console.log('User Prompt Length:', userPrompt.length);
-        console.log('Request started at:', new Date().toISOString());
+        const totalSystemPromptLength = systemPromptBlocks.reduce((sum, block) => sum + block.text.length, 0);
+
+        if (this.enableConsoleLogs) {
+            console.log('=== Starting OpenRouter API Request (Review) ===');
+            console.log('Model:', model);
+            console.log('Subject Line Length:', subjectLine.length);
+            console.log('Email Copy Length:', emailCopy.length);
+            console.log('System Prompt Length:', totalSystemPromptLength);
+            console.log('User Prompt Length:', userPrompt.length);
+            console.log('Request started at:', new Date().toISOString());
+        }
 
         try {
             const startTime = Date.now();
@@ -410,7 +635,7 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
                     messages: [
                         {
                             role: 'system',
-                            content: systemPrompt
+                            content: systemPromptBlocks
                         },
                         {
                             role: 'user',
@@ -434,18 +659,23 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
 
             const data = await response.json();
 
-            console.log('=== OpenRouter API Response Received ===');
-            console.log('Response time:', duration + 'ms');
-            console.log('Response completed at:', new Date().toISOString());
+            if (this.enableConsoleLogs) {
+                console.log('=== OpenRouter API Response Received ===');
+                console.log('Response time:', formatTime(duration));
+                console.log('Response completed at:', new Date().toISOString());
+            }
 
             const responseText = data.choices[0].message.content;
-            console.log('Response content length:', responseText.length);
+            if (this.enableConsoleLogs) {
+                console.log('Response content length:', responseText.length);
+            }
 
             const parsedResponse = this.parseAIResponse(responseText);
 
             // Log the prompt and response
+            const systemPromptText = systemPromptBlocks.map(block => block.text).join('\n\n');
             this.logPromptAndResponse('review', {
-                systemPrompt,
+                systemPrompt: systemPromptText,
                 userPrompt,
                 response: responseText,
                 parsedResponse,
@@ -480,33 +710,49 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
     }
 
     async improveCopy(subjectLine, emailCopy, review, model) {
-        // Auto-detect provider based on model name format
-        // If model has "/" it's an OpenRouter model (e.g., "anthropic/claude-3.5-sonnet", "openai/gpt-4o")
-        const useOpenRouter = model && model.includes('/');
+        // Determine which provider to use (respects AI_PROVIDER setting first)
+        const provider = this.determineProvider(model);
 
-        if (useOpenRouter || this.provider === 'openrouter') {
-            return await this.improveWithOpenRouter(subjectLine, emailCopy, review, model);
-        } else if (this.provider === 'claude') {
-            return await this.improveWithClaude(subjectLine, emailCopy, review, model);
-        } else if (this.provider === 'openai') {
+        // Validate that the required API key exists for this provider
+        this.validateApiKey(provider);
+
+        // Normalize model name for the selected provider
+        const normalizedModel = this.normalizeModelName(model, provider);
+
+        if (this.enableConsoleLogs) {
+            console.log(`Provider determination: ${provider}`);
+            console.log(`Original model: ${model}`);
+            console.log(`Normalized model: ${normalizedModel}`);
+        }
+
+        // Route to the appropriate provider implementation
+        if (provider === 'openrouter') {
+            return await this.improveWithOpenRouter(subjectLine, emailCopy, review, normalizedModel || model);
+        } else if (provider === 'claude' || provider === 'anthropic') {
+            return await this.improveWithClaude(subjectLine, emailCopy, review, normalizedModel || model);
+        } else if (provider === 'openai') {
             return await this.improveWithOpenAI(subjectLine, emailCopy, review);
         } else {
-            throw new Error('Invalid AI provider specified');
+            throw new Error(`Invalid AI provider specified: ${provider}`);
         }
     }
 
     async improveWithClaude(subjectLine, emailCopy, review, model = 'claude-sonnet-4-5-20250929') {
-        const systemPrompt = this.buildImproveSystemPrompt();
+        const systemPromptBlocks = this.buildImproveSystemPromptBlocks();
         const userPrompt = this.buildImproveUserPrompt(subjectLine, emailCopy, review);
 
-        console.log('=== Starting Claude API Request (Improve) ===');
-        console.log('Model:', model);
-        console.log('Subject Line Length:', subjectLine.length);
-        console.log('Email Copy Length:', emailCopy.length);
-        console.log('System Prompt Length:', systemPrompt.length);
-        console.log('User Prompt Length:', userPrompt.length);
-        console.log('Timeout: 60000ms');
-        console.log('Request started at:', new Date().toISOString());
+        const totalSystemPromptLength = systemPromptBlocks.reduce((sum, block) => sum + block.text.length, 0);
+
+        if (this.enableConsoleLogs) {
+            console.log('=== Starting Claude API Request (Improve) ===');
+            console.log('Model:', model);
+            console.log('Subject Line Length:', subjectLine.length);
+            console.log('Email Copy Length:', emailCopy.length);
+            console.log('System Prompt Length:', totalSystemPromptLength);
+            console.log('User Prompt Length:', userPrompt.length);
+            console.log('Timeout: 60000ms');
+            console.log('Request started at:', new Date().toISOString());
+        }
 
         try {
             const startTime = Date.now();
@@ -514,13 +760,7 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
                 model: model,
                 max_tokens: 3000, // Optimized for concise responses
                 temperature: 0.8,
-                system: [
-                    {
-                        type: "text",
-                        text: systemPrompt,
-                        cache_control: { type: "ephemeral" } // Cache system prompt for 5 minutes
-                    }
-                ],
+                system: systemPromptBlocks,
                 messages: [
                     {
                         role: 'user',
@@ -534,11 +774,13 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
             });
             const duration = Date.now() - startTime;
 
-            console.log('=== Claude API Response Received ===');
-            console.log('Response time:', duration + 'ms');
-            console.log('Response completed at:', new Date().toISOString());
-            console.log('Response content length:', message.content[0].text.length);
-            console.log('Stop reason:', message.stop_reason);
+            if (this.enableConsoleLogs) {
+                console.log('=== Claude API Response Received ===');
+                console.log('Response time:', formatTime(duration));
+                console.log('Response completed at:', new Date().toISOString());
+                console.log('Response content length:', message.content[0].text.length);
+                console.log('Stop reason:', message.stop_reason);
+            }
 
             // Check if response was cut off
             if (message.stop_reason === 'max_tokens') {
@@ -550,8 +792,9 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
             const parsedResponse = this.parseImproveResponse(responseText);
 
             // Log the prompt and response
+            const systemPromptText = systemPromptBlocks.map(block => block.text).join('\n\n');
             this.logPromptAndResponse('improve', {
-                systemPrompt,
+                systemPrompt: systemPromptText,
                 userPrompt,
                 reviewData: review,
                 response: responseText,
@@ -588,16 +831,20 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
     }
 
     async improveWithOpenRouter(subjectLine, emailCopy, review, model = 'anthropic/claude-sonnet-4-5:beta') {
-        const systemPrompt = this.buildImproveSystemPrompt();
+        const systemPromptBlocks = this.buildImproveSystemPromptBlocks();
         const userPrompt = this.buildImproveUserPrompt(subjectLine, emailCopy, review);
 
-        console.log('=== Starting OpenRouter API Request (Improve) ===');
-        console.log('Model:', model);
-        console.log('Subject Line Length:', subjectLine.length);
-        console.log('Email Copy Length:', emailCopy.length);
-        console.log('System Prompt Length:', systemPrompt.length);
-        console.log('User Prompt Length:', userPrompt.length);
-        console.log('Request started at:', new Date().toISOString());
+        const totalSystemPromptLength = systemPromptBlocks.reduce((sum, block) => sum + block.text.length, 0);
+
+        if (this.enableConsoleLogs) {
+            console.log('=== Starting OpenRouter API Request (Improve) ===');
+            console.log('Model:', model);
+            console.log('Subject Line Length:', subjectLine.length);
+            console.log('Email Copy Length:', emailCopy.length);
+            console.log('System Prompt Length:', totalSystemPromptLength);
+            console.log('User Prompt Length:', userPrompt.length);
+            console.log('Request started at:', new Date().toISOString());
+        }
 
         try {
             const startTime = Date.now();
@@ -614,7 +861,7 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
                     messages: [
                         {
                             role: 'system',
-                            content: systemPrompt
+                            content: systemPromptBlocks
                         },
                         {
                             role: 'user',
@@ -638,18 +885,23 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
 
             const data = await response.json();
 
-            console.log('=== OpenRouter API Response Received ===');
-            console.log('Response time:', duration + 'ms');
-            console.log('Response completed at:', new Date().toISOString());
+            if (this.enableConsoleLogs) {
+                console.log('=== OpenRouter API Response Received ===');
+                console.log('Response time:', formatTime(duration));
+                console.log('Response completed at:', new Date().toISOString());
+            }
 
             const responseText = data.choices[0].message.content;
-            console.log('Response content length:', responseText.length);
+            if (this.enableConsoleLogs) {
+                console.log('Response content length:', responseText.length);
+            }
 
             const parsedResponse = this.parseImproveResponse(responseText);
 
             // Log the prompt and response
+            const systemPromptText = systemPromptBlocks.map(block => block.text).join('\n\n');
             this.logPromptAndResponse('improve', {
-                systemPrompt,
+                systemPrompt: systemPromptText,
                 userPrompt,
                 reviewData: review,
                 response: responseText,
@@ -682,18 +934,369 @@ ${this.extractFurtherTips(improveData.parsedResponse)}
         throw new Error('OpenAI integration not yet implemented. Please use Claude.');
     }
 
-    buildImproveSystemPrompt() {
+    async analyzeAndImproveWithClaude(subjectLine, emailCopy, model = 'claude-sonnet-4-5-20250929') {
+        const systemPromptBlocks = this.buildCombinedSystemPromptBlocks();
+        const userPrompt = this.buildCombinedUserPrompt(subjectLine, emailCopy);
+
+        const totalSystemPromptLength = systemPromptBlocks.reduce((sum, block) => sum + block.text.length, 0);
+
+        if (this.enableConsoleLogs) {
+            console.log('=== Starting Combined Claude API Request ===');
+            console.log('Model:', model);
+            console.log('Subject Line Length:', subjectLine.length);
+            console.log('Email Copy Length:', emailCopy.length);
+            console.log('System Prompt Length:', totalSystemPromptLength);
+            console.log('User Prompt Length:', userPrompt.length);
+            console.log('Timeout: 60000ms');
+            console.log('Request started at:', new Date().toISOString());
+        }
+
+        try {
+            const startTime = Date.now();
+            const message = await this.anthropic.messages.create({
+                model: model,
+                max_tokens: 4000,
+                temperature: 0.7,
+                system: systemPromptBlocks,
+                messages: [
+                    {
+                        role: 'user',
+                        content: userPrompt
+                    },
+                    {
+                        role: 'assistant',
+                        content: '{\n    "overallScore":'
+                    }
+                ]
+            });
+            const duration = Date.now() - startTime;
+
+            if (this.enableConsoleLogs) {
+                console.log('=== Combined Claude API Response Received ===');
+                console.log('Response time:', formatTime(duration));
+                console.log('Response completed at:', new Date().toISOString());
+                console.log('Response content length:', message.content[0].text.length);
+                console.log('Stop reason:', message.stop_reason);
+            }
+
+            if (message.stop_reason === 'max_tokens') {
+                console.warn('WARNING: Response was truncated due to max_tokens limit');
+                throw new Error('Response was incomplete. The AI model hit the token limit. Please try with a shorter email or contact support.');
+            }
+
+            const responseText = message.content[0].text;
+            const parsedResponse = this.parseCombinedResponse(responseText);
+
+            // Log the prompt and response
+            const systemPromptText = systemPromptBlocks.map(block => block.text).join('\n\n');
+            this.logPromptAndResponse('combined', {
+                systemPrompt: systemPromptText,
+                userPrompt,
+                response: responseText,
+                parsedResponse,
+                model,
+                responseTime: duration,
+                stopReason: message.stop_reason,
+                contentLength: responseText.length
+            });
+
+            return parsedResponse;
+        } catch (error) {
+            console.error('=== Combined Claude API Error ===');
+            console.error('Error occurred at:', new Date().toISOString());
+            console.error('Error type:', error.constructor.name);
+            console.error('Error status:', error.status);
+            console.error('Error code:', error.code);
+            console.error('Error message:', error.message);
+
+            if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+                throw new Error(`Request timed out after 60 seconds. The API may be slow or unavailable. Please try again.`);
+            } else if (error.status === 404) {
+                throw new Error(`Claude API model not found. Please check your API key has access to ${model}. Error: ${error.message}`);
+            } else if (error.status === 401) {
+                throw new Error('Invalid or expired Anthropic API key. Please update ANTHROPIC_API_KEY in your .env file.');
+            } else if (error.status === 429) {
+                throw new Error('Rate limit exceeded. Please try again later.');
+            } else if (error.status === 529) {
+                throw new Error('Claude API is temporarily overloaded. Please wait a moment and try again.');
+            }
+            throw new Error(`Failed to analyze and improve with Claude API: ${error.message} (Status: ${error.status}, Code: ${error.code})`);
+        }
+    }
+
+    async analyzeAndImproveWithOpenRouter(subjectLine, emailCopy, model = 'anthropic/claude-sonnet-4-5:beta') {
+        const systemPromptBlocks = this.buildCombinedSystemPromptBlocks();
+        const userPrompt = this.buildCombinedUserPrompt(subjectLine, emailCopy);
+
+        const totalSystemPromptLength = systemPromptBlocks.reduce((sum, block) => sum + block.text.length, 0);
+
+        if (this.enableConsoleLogs) {
+            console.log('=== Starting Combined OpenRouter API Request ===');
+            console.log('Model:', model);
+            console.log('Subject Line Length:', subjectLine.length);
+            console.log('Email Copy Length:', emailCopy.length);
+            console.log('System Prompt Length:', totalSystemPromptLength);
+            console.log('User Prompt Length:', userPrompt.length);
+            console.log('Request started at:', new Date().toISOString());
+        }
+
+        try {
+            const startTime = Date.now();
+            const response = await fetch(this.openRouterUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.openRouterApiKey}`,
+                    'HTTP-Referer': 'https://coldiq.com',
+                    'X-Title': 'ColdIQ Email Optimizer',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [
+                        {
+                            role: 'system',
+                            content: systemPromptBlocks
+                        },
+                        {
+                            role: 'user',
+                            content: userPrompt
+                        },
+                        {
+                            role: 'assistant',
+                            content: '{\n    "overallScore":'
+                        }
+                    ],
+                    max_tokens: 4000,
+                    temperature: 0.7
+                })
+            });
+            const duration = Date.now() - startTime;
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(`OpenRouter API error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+            }
+
+            const data = await response.json();
+
+            if (this.enableConsoleLogs) {
+                console.log('=== Combined OpenRouter API Response Received ===');
+                console.log('Response time:', formatTime(duration));
+                console.log('Response completed at:', new Date().toISOString());
+            }
+
+            const responseText = data.choices[0].message.content;
+            if (this.enableConsoleLogs) {
+                console.log('Response content length:', responseText.length);
+            }
+
+            const parsedResponse = this.parseCombinedResponse(responseText);
+
+            // Log the prompt and response
+            const systemPromptText = systemPromptBlocks.map(block => block.text).join('\n\n');
+            this.logPromptAndResponse('combined', {
+                systemPrompt: systemPromptText,
+                userPrompt,
+                response: responseText,
+                parsedResponse,
+                model,
+                responseTime: duration,
+                stopReason: data.choices[0].finish_reason || 'stop',
+                contentLength: responseText.length
+            });
+
+            return parsedResponse;
+        } catch (error) {
+            console.error('=== Combined OpenRouter API Error ===');
+            console.error('Error occurred at:', new Date().toISOString());
+            console.error('Error type:', error.constructor.name);
+            console.error('Error message:', error.message);
+
+            if (error.message && error.message.includes('timeout')) {
+                throw new Error(`Request timed out. The API may be slow or unavailable. Please try again.`);
+            } else if (error.message && error.message.includes('401')) {
+                throw new Error('Invalid or expired OpenRouter API key. Please update OPENROUTER_API_KEY in your .env file.');
+            } else if (error.message && error.message.includes('429')) {
+                throw new Error('Rate limit exceeded. Please try again later.');
+            }
+            throw new Error(`Failed to analyze and improve with OpenRouter API: ${error.message}`);
+        }
+    }
+
+    buildCombinedSystemPromptBlocks() {
+        const comprehensivePrompt = getComprehensivePrompt();
+
+        return [
+            {
+                type: "text",
+                text: comprehensivePrompt
+            }
+        ];
+    }
+
+    buildCombinedUserPrompt(subjectLine, emailCopy) {
+        return `Analyze this cold email, provide a score, and rewrite it to maximize response rate.
+
+---SUBJECT LINE---
+${subjectLine}
+---END SUBJECT LINE---
+
+---EMAIL BODY---
+${emailCopy}
+---END EMAIL BODY---
+
+Provide your analysis and improved version in the JSON format specified.`;
+    }
+
+    // Helper method to fix unescaped control characters in JSON strings
+    fixJSONControlCharacters(jsonString) {
+        // 1. Remove trailing commas
+        jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1');
+
+        // 2. Fix unescaped control characters in strings
+        // This is a robust approach that handles escaped quotes correctly
+        let fixedString = '';
+        let inString = false;
+        let escapeNext = false;
+
+        for (let i = 0; i < jsonString.length; i++) {
+            const char = jsonString[i];
+
+            if (escapeNext) {
+                fixedString += char;
+                escapeNext = false;
+                continue;
+            }
+
+            if (char === '\\') {
+                fixedString += char;
+                escapeNext = true;
+                continue;
+            }
+
+            if (char === '"') {
+                fixedString += char;
+                inString = !inString;
+                continue;
+            }
+
+            // If we're inside a string and hit a control character, escape it
+            if (inString) {
+                if (char === '\n') {
+                    fixedString += '\\n';
+                } else if (char === '\r') {
+                    fixedString += '\\r';
+                } else if (char === '\t') {
+                    fixedString += '\\t';
+                } else if (char === '\b') {
+                    fixedString += '\\b';
+                } else if (char === '\f') {
+                    fixedString += '\\f';
+                } else {
+                    fixedString += char;
+                }
+            } else {
+                fixedString += char;
+            }
+        }
+
+        return fixedString;
+    }
+
+    parseCombinedResponse(responseText) {
+        try {
+            let cleanedText = responseText
+                .replace(/```json/g, '')
+                .replace(/```/g, '')
+                .trim();
+
+            if (this.enableConsoleLogs) {
+                console.log('=== JSON Parsing (Combined) ===');
+                console.log('Original length:', responseText.length);
+                console.log('Cleaned length:', cleanedText.length);
+                console.log('First 100 chars:', cleanedText.substring(0, 100));
+            }
+
+            // Prepend the prefill content
+            cleanedText = '{\n    "overallScore":' + cleanedText;
+
+            const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                let jsonString = jsonMatch[0];
+
+                try {
+                    const parsed = JSON.parse(jsonString);
+                    return this.validateCombinedResponse(parsed);
+                } catch (parseError) {
+                    if (this.enableConsoleLogs) {
+                        console.log('Initial parse failed, cleaning JSON...');
+                        console.log('Parse error:', parseError.message);
+                    }
+
+                    // Apply cleanup: fix control characters and trailing commas
+                    jsonString = this.fixJSONControlCharacters(jsonString);
+
+                    try {
+                        const parsed = JSON.parse(jsonString);
+                        return this.validateCombinedResponse(parsed);
+                    } catch (secondError) {
+                        if (this.enableConsoleLogs) {
+                            console.log('Second parse failed:', secondError.message);
+                            const errorPos = parseInt(secondError.message.match(/position (\d+)/)?.[1] || 0);
+                            if (errorPos > 0) {
+                                console.log('Context around error:', jsonString.substring(Math.max(0, errorPos - 50), Math.min(jsonString.length, errorPos + 50)));
+                            }
+                        }
+                        throw secondError;
+                    }
+                }
+            }
+            throw new Error('No valid JSON found in response');
+        } catch (error) {
+            console.error('Failed to parse combined response:', error);
+            console.error('Response excerpt:', responseText.substring(0, 500));
+            throw new Error('Failed to parse AI response');
+        }
+    }
+
+    validateCombinedResponse(response) {
+        if (!response.overallScore || !response.improvedSubject || !response.improvedBody) {
+            throw new Error('Invalid combined response structure');
+        }
+
+        // Ensure score is between 0 and 100
+        response.overallScore = Math.max(0, Math.min(100, response.overallScore));
+
+        // Ensure arrays exist
+        if (!response.changes || !Array.isArray(response.changes)) {
+            response.changes = [];
+        }
+        if (!response.furtherTips || !Array.isArray(response.furtherTips)) {
+            response.furtherTips = [];
+        }
+
+        return response;
+    }
+
+    buildImproveSystemPromptBlocks() {
         const bestCopiesContext = bestPerformingCopies.getBestCopiesSummary();
         const bestPracticesContext = getBestPracticesContext();
 
-        return `You are an expert cold email copywriter. Rewrite cold emails to maximize response rates.
-
-${bestPracticesContext}
+        return [
+            {
+                type: "text",
+                text: "You are an expert cold email copywriter. Rewrite cold emails to maximize response rates."
+            },
+            {
+                type: "text",
+                text: `${bestPracticesContext}
 
 BEST PERFORMING PATTERNS:
-${bestCopiesContext}
-
-REWRITE GUIDELINES:
+${bestCopiesContext}`
+            },
+            {
+                type: "text",
+                text: `REWRITE GUIDELINES:
 - Apply review feedback
 - Follow best performing patterns
 - Keep body 70-95 words
@@ -730,7 +1333,9 @@ Structure:
     "expectedImpact": "<1 sentence performance prediction>"
 }
 
-Keep changes array focused (3-5 items max). Keep all text concise.`;
+Keep changes array focused (3-5 items max). Keep all text concise.`
+            }
+        ];
     }
 
     buildImproveUserPrompt(subjectLine, emailCopy, review) {
@@ -761,11 +1366,13 @@ Generate an improved version that addresses the feedback and follows best perfor
                 .trim();
 
             // Log diagnostic info
-            console.log('=== JSON Parsing (Improve) ===');
-            console.log('Original length:', responseText.length);
-            console.log('Cleaned length:', cleanedText.length);
-            console.log('First 100 chars:', cleanedText.substring(0, 100));
-            console.log('Last 100 chars:', cleanedText.substring(Math.max(0, cleanedText.length - 100)));
+            if (this.enableConsoleLogs) {
+                console.log('=== JSON Parsing (Improve) ===');
+                console.log('Original length:', responseText.length);
+                console.log('Cleaned length:', cleanedText.length);
+                console.log('First 100 chars:', cleanedText.substring(0, 100));
+                console.log('Last 100 chars:', cleanedText.substring(Math.max(0, cleanedText.length - 100)));
+            }
 
             // Prepend the prefill content that was stripped
             cleanedText = '{\n    "improvedSubject":"' + cleanedText;
@@ -773,37 +1380,34 @@ Generate an improved version that addresses the feedback and follows best perfor
             const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 let jsonString = jsonMatch[0];
-                console.log('JSON extracted, length:', jsonString.length);
+                if (this.enableConsoleLogs) {
+                    console.log('JSON extracted, length:', jsonString.length);
+                }
 
                 // First try to parse directly
                 try {
                     const parsed = JSON.parse(jsonString);
                     return this.validateImproveResponse(parsed);
                 } catch (parseError) {
-                    console.log('Initial parse failed, attempting to clean JSON...');
-                    console.log('Parse error:', parseError.message);
+                    if (this.enableConsoleLogs) {
+                        console.log('Initial parse failed, attempting to clean JSON...');
+                        console.log('Parse error:', parseError.message);
+                    }
 
-                    // Apply multiple cleanup strategies
-                    // 1. Remove trailing commas in arrays and objects
-                    jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1');
-
-                    // 2. Fix common quote issues in strings
-                    // Replace unescaped quotes within string values
-                    // This is a simple approach - may need refinement
+                    // Apply cleanup: fix control characters and trailing commas
+                    jsonString = this.fixJSONControlCharacters(jsonString);
 
                     try {
                         const parsed = JSON.parse(jsonString);
                         return this.validateImproveResponse(parsed);
                     } catch (secondError) {
-                        console.log('Second parse attempt failed:', secondError.message);
-                        console.log('JSON excerpt around error:', jsonString.substring(Math.max(0, secondError.message.match(/\d+/)?.[0] - 100), Math.min(jsonString.length, parseInt(secondError.message.match(/\d+/)?.[0] || 0) + 100)));
-
-                        // Last resort: try to fix the specific position
-                        const errorPos = parseInt(secondError.message.match(/position (\d+)/)?.[1] || 0);
-                        if (errorPos > 0) {
-                            console.log('Character at error position:', jsonString[errorPos], 'Code:', jsonString.charCodeAt(errorPos));
+                        if (this.enableConsoleLogs) {
+                            console.log('Second parse attempt failed:', secondError.message);
+                            const errorPos = parseInt(secondError.message.match(/position (\d+)/)?.[1] || 0);
+                            if (errorPos > 0) {
+                                console.log('Context around error:', jsonString.substring(Math.max(0, errorPos - 50), Math.min(jsonString.length, errorPos + 50)));
+                            }
                         }
-
                         throw secondError;
                     }
                 }
@@ -829,18 +1433,25 @@ Generate an improved version that addresses the feedback and follows best perfor
         return response;
     }
 
-    buildSystemPrompt() {
+    buildSystemPromptBlocks() {
         const bestCopiesContext = bestPerformingCopies.getBestCopiesSummary();
         const bestPracticesContext = getBestPracticesContext();
 
-        return `You are an expert cold email copywriter. Review cold emails and provide concise, actionable feedback.
-
-${bestPracticesContext}
+        return [
+            {
+                type: "text",
+                text: "You are an expert cold email copywriter. Review cold emails and provide concise, actionable feedback."
+            },
+            {
+                type: "text",
+                text: `${bestPracticesContext}
 
 BEST PERFORMING PATTERNS:
-${bestCopiesContext}
-
-RESPONSE RULES:
+${bestCopiesContext}`
+            },
+            {
+                type: "text",
+                text: `RESPONSE RULES:
 - Be specific and concise (2-3 sentences per section)
 - Keep items short (under 15 words each)
 - Maximum 3-4 items per section
@@ -865,7 +1476,9 @@ JSON Structure:
     ]
 }
 
-Include these sections: Subject Line Analysis, Opening Hook, Value Proposition, Personalization, Call to Action, Length & Structure, vs Best Performers`;
+Include these sections: Subject Line Analysis, Opening Hook, Value Proposition, Personalization, Call to Action, Length & Structure, vs Best Performers`
+            }
+        ];
     }
 
     buildUserPrompt(subjectLine, emailCopy) {
@@ -891,11 +1504,13 @@ Provide your analysis in the JSON format specified.`;
                 .trim();
 
             // Log diagnostic info
-            console.log('=== JSON Parsing (Review) ===');
-            console.log('Original length:', responseText.length);
-            console.log('Cleaned length:', cleanedText.length);
-            console.log('First 100 chars:', cleanedText.substring(0, 100));
-            console.log('Last 100 chars:', cleanedText.substring(Math.max(0, cleanedText.length - 100)));
+            if (this.enableConsoleLogs) {
+                console.log('=== JSON Parsing (Review) ===');
+                console.log('Original length:', responseText.length);
+                console.log('Cleaned length:', cleanedText.length);
+                console.log('First 100 chars:', cleanedText.substring(0, 100));
+                console.log('Last 100 chars:', cleanedText.substring(Math.max(0, cleanedText.length - 100)));
+            }
 
             // Prepend the prefill content that was stripped
             cleanedText = '{\n    "overallScore":' + cleanedText;
@@ -904,23 +1519,36 @@ Provide your analysis in the JSON format specified.`;
             const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 let jsonString = jsonMatch[0];
-                console.log('JSON extracted, length:', jsonString.length);
+                if (this.enableConsoleLogs) {
+                    console.log('JSON extracted, length:', jsonString.length);
+                }
 
                 // Try to parse directly first
                 try {
                     const parsed = JSON.parse(jsonString);
                     return this.validateResponse(parsed);
                 } catch (parseError) {
-                    console.log('Initial parse failed, attempting to clean JSON...');
-                    console.log('Parse error:', parseError.message);
+                    if (this.enableConsoleLogs) {
+                        console.log('Initial parse failed, attempting to clean JSON...');
+                        console.log('Parse error:', parseError.message);
+                    }
 
-                    // Fix common JSON issues
-                    // 1. Remove trailing commas in arrays and objects
-                    jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1');
+                    // Apply cleanup: fix control characters and trailing commas
+                    jsonString = this.fixJSONControlCharacters(jsonString);
 
-                    // 2. Try parsing again
-                    const parsed = JSON.parse(jsonString);
-                    return this.validateResponse(parsed);
+                    try {
+                        const parsed = JSON.parse(jsonString);
+                        return this.validateResponse(parsed);
+                    } catch (secondError) {
+                        if (this.enableConsoleLogs) {
+                            console.log('Second parse failed:', secondError.message);
+                            const errorPos = parseInt(secondError.message.match(/position (\d+)/)?.[1] || 0);
+                            if (errorPos > 0) {
+                                console.log('Context around error:', jsonString.substring(Math.max(0, errorPos - 50), Math.min(jsonString.length, errorPos + 50)));
+                            }
+                        }
+                        throw secondError;
+                    }
                 }
             }
             throw new Error('No valid JSON found in response');

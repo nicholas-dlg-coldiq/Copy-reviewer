@@ -37,7 +37,7 @@
                             <label for="modelSelectModal" class="settings-label">AI Model</label>
                             <select id="modelSelectModal" class="settings-dropdown">
                                 <optgroup label="Anthropic (via OpenRouter)">
-                                    <option value="anthropic/claude-sonnet-4-5:beta" selected>Claude Sonnet 4.5 (Recommended)</option>
+                                    <option value="anthropic/claude-sonnet-4.5" selected>Claude Sonnet 4.5 (Recommended)</option>
                                     <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
                                     <option value="anthropic/claude-3-haiku">Claude 3 Haiku (Faster)</option>
                                 </optgroup>
@@ -118,7 +118,7 @@
                             <svg class="spinner" viewBox="0 0 50 50">
                                 <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
                             </svg>
-                            <span class="loading-text">Analyzing... (20-30 secs)</span>
+                            <span class="loading-text">Reviewing your copy and generating improvements...</span>
                         </span>
                     </button>
                     <button id="clearBtn" class="btn btn-link">Clear</button>
@@ -142,6 +142,18 @@
                     <div class="section-header">
                         <h3 class="section-title">Optimized Copy</h3>
                         <button id="showOriginalBtn" class="btn-text-link">Show Original</button>
+                    </div>
+
+                    <!-- Disclaimer Notice -->
+                    <div class="disclaimer-notice">
+                        <svg class="disclaimer-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                        <div class="disclaimer-content">
+                            <strong>Note:</strong> This is an <em>example</em> of ideal copy structure. The prospect research, case studies, and specific data points shown are fabricated to demonstrate best practices. Replace with actual research about your prospect before sending.
+                        </div>
                     </div>
 
                     <!-- Original Copy (Collapsible) -->
