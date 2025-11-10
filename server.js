@@ -68,7 +68,15 @@ if (validation.errors.length > 0) {
     console.error('\n❌ Environment Validation Failed:');
     validation.errors.forEach(error => console.error(`  - ${error}`));
     console.error('\nPlease check your .env file and ensure all required variables are set.');
-    console.error('See .env.example for reference.\n');
+    console.error('See .env.example for reference.');
+    console.error('\nCurrent environment variables (sanitized):');
+    console.error(`  - NODE_ENV: ${process.env.NODE_ENV || 'not set'}`);
+    console.error(`  - AI_PROVIDER: ${process.env.AI_PROVIDER || 'not set'}`);
+    console.error(`  - PORT: ${process.env.PORT || 'not set'}`);
+    console.error(`  - ANTHROPIC_API_KEY: ${process.env.ANTHROPIC_API_KEY ? 'set' : 'not set'}`);
+    console.error(`  - OPENROUTER_API_KEY: ${process.env.OPENROUTER_API_KEY ? 'set' : 'not set'}`);
+    console.error(`  - SUPABASE_URL: ${process.env.SUPABASE_URL ? 'set' : 'not set (optional)'}`);
+    console.error(`  - SUPABASE_SERVICE_KEY: ${process.env.SUPABASE_SERVICE_KEY ? 'set' : 'not set (optional)'}\n`);
     process.exit(1);
 }
 
@@ -80,6 +88,7 @@ if (validation.warnings.length > 0) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0'; // Bind to 0.0.0.0 for cloud platforms like Railway
 
 // Middleware
 app.use(cors());
@@ -110,11 +119,11 @@ app.use((err, req, res, next) => {
     });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
     console.log('\n==============================================');
     console.log('  COLDIQ EMAIL OPTIMIZER - SERVER STARTED');
     console.log('==============================================\n');
-    console.log(`🚀 Server URL: http://localhost:${PORT}`);
+    console.log(`🚀 Server listening on: ${HOST}:${PORT}`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log('');
     console.log('AI Configuration:');
@@ -127,6 +136,11 @@ app.listen(PORT, () => {
     if (aiProvider === 'openrouter' || process.env.OPENROUTER_API_KEY) {
         console.log(`  - OpenRouter API Key: ${process.env.OPENROUTER_API_KEY ? '✓ Configured' : '✗ Missing'}`);
     }
+
+    console.log('');
+    console.log('Database Configuration:');
+    console.log(`  - Supabase URL: ${process.env.SUPABASE_URL ? '✓ Configured' : '✗ Not set (optional)'}`);
+    console.log(`  - Supabase Service Key: ${process.env.SUPABASE_SERVICE_KEY ? '✓ Configured' : '✗ Not set (optional)'}`);
 
     console.log('');
     console.log('Logging Configuration:');
