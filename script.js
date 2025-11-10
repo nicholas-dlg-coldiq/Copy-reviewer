@@ -295,7 +295,19 @@ async function handleAnalyzeClick() {
         const result = await analyzeAndImprove(subjectLine, copyText);
         displayResults(result);
     } catch (error) {
-        showError(error.message || 'An error occurred while analyzing your copy. Please try again.');
+        // Handle different error types
+        let errorMessage = error.message || 'An error occurred while analyzing your copy. Please try again.';
+
+        // Check for timeout errors
+        if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+            errorMessage = 'The request took too long. Please try again with a shorter email or check your internet connection.';
+        }
+        // Check for network errors
+        else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+            errorMessage = 'Network error. Please check your internet connection and try again.';
+        }
+
+        showError(errorMessage);
     } finally {
         setLoadingState(false);
     }
@@ -346,7 +358,30 @@ async function analyzeAndImprove(subjectLine, copyText) {
     });
 
     if (!response.ok) {
-        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+        // Try to get error message from response body
+        let errorMessage = 'An error occurred while analyzing your copy. Please try again.';
+        try {
+            const errorData = await response.json();
+            if (errorData.message) {
+                errorMessage = errorData.message;
+            }
+            // If validation errors exist, show the first one
+            if (errorData.details && Array.isArray(errorData.details) && errorData.details.length > 0) {
+                errorMessage = errorData.details[0];
+            }
+        } catch (e) {
+            // If we can't parse the error, use status-based message
+            if (response.status === 400) {
+                errorMessage = 'Invalid input. Please check your email and try again.';
+            } else if (response.status === 429) {
+                errorMessage = 'Too many requests. Please wait a moment and try again.';
+            } else if (response.status === 503) {
+                errorMessage = 'Our AI service is temporarily unavailable. Please try again in a moment.';
+            } else if (response.status >= 500) {
+                errorMessage = 'Server error. Please try again in a moment.';
+            }
+        }
+        throw new Error(errorMessage);
     }
 
     const data = await response.json();

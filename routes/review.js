@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const aiService = require('../services/aiService');
 const databaseService = require('../services/databaseService');
+const { validateEmailInput, sanitizeInput } = require('../services/validationService');
 
 // Helper function to format time in both ms and seconds
 function formatTime(ms) {
@@ -29,8 +30,23 @@ router.post('/review-copy', async (req, res) => {
             });
         }
 
+        // Security validation
+        const validationErrors = validateEmailInput(subjectLine, copy);
+        if (validationErrors.length > 0) {
+            console.warn('⚠️  Security validation failed:', validationErrors);
+            return res.status(400).json({
+                error: 'Invalid input',
+                message: 'Your input contains invalid content. Please ensure you are submitting a legitimate email for review.',
+                details: validationErrors
+            });
+        }
+
+        // Sanitize inputs
+        const sanitizedSubject = sanitizeInput(subjectLine);
+        const sanitizedCopy = sanitizeInput(copy);
+
         // Get review from AI service
-        const review = await aiService.reviewCopy(subjectLine, copy);
+        const review = await aiService.reviewCopy(sanitizedSubject, sanitizedCopy);
 
         res.json(review);
     } catch (error) {
@@ -69,8 +85,23 @@ router.post('/improve', async (req, res) => {
             });
         }
 
+        // Security validation
+        const validationErrors = validateEmailInput(subjectLine, copy);
+        if (validationErrors.length > 0) {
+            console.warn('⚠️  Security validation failed:', validationErrors);
+            return res.status(400).json({
+                error: 'Invalid input',
+                message: 'Your input contains invalid content. Please ensure you are submitting a legitimate email for review.',
+                details: validationErrors
+            });
+        }
+
+        // Sanitize inputs
+        const sanitizedSubject = sanitizeInput(subjectLine);
+        const sanitizedCopy = sanitizeInput(copy);
+
         // Get improved copy from AI service
-        const improvedCopy = await aiService.improveCopy(subjectLine, copy, review);
+        const improvedCopy = await aiService.improveCopy(sanitizedSubject, sanitizedCopy, review);
 
         res.json(improvedCopy);
     } catch (error) {
@@ -117,6 +148,21 @@ router.post('/analyze-and-improve', async (req, res) => {
             });
         }
 
+        // Security validation - check for malicious input
+        const validationErrors = validateEmailInput(subjectLine, copy);
+        if (validationErrors.length > 0) {
+            console.warn('⚠️  Security validation failed:', validationErrors);
+            return res.status(400).json({
+                error: 'Invalid input',
+                message: 'Your input contains invalid content. Please ensure you are submitting a legitimate email for review.',
+                details: validationErrors
+            });
+        }
+
+        // Sanitize inputs (remove control characters)
+        const sanitizedSubject = sanitizeInput(subjectLine);
+        const sanitizedCopy = sanitizeInput(copy);
+
         // Log model selection
         const selectedModel = model || 'claude-sonnet-4-5-20250929';
         console.log(`Using model: ${selectedModel}`);
@@ -125,9 +171,9 @@ router.post('/analyze-and-improve', async (req, res) => {
         const sessionId = aiService.createSession();
         console.log(`Session created: ${sessionId}`);
 
-        // Single combined API call
+        // Single combined API call (use sanitized inputs)
         console.log('Starting COMBINED analyze-and-improve API call...');
-        const result = await aiService.analyzeAndImprove(subjectLine, copy, selectedModel);
+        const result = await aiService.analyzeAndImprove(sanitizedSubject, sanitizedCopy, selectedModel);
 
         const totalDuration = Date.now() - requestStartTime;
         console.log('\n========================================');
@@ -155,8 +201,8 @@ router.post('/analyze-and-improve', async (req, res) => {
         // Return combined response
         res.json({
             original: {
-                subjectLine,
-                copy
+                subjectLine: sanitizedSubject,
+                copy: sanitizedCopy
             },
             review: {
                 score: result.overallScore,
@@ -180,9 +226,27 @@ router.post('/analyze-and-improve', async (req, res) => {
         console.error('Failed at:', new Date().toISOString());
         console.error('========================================\n');
 
-        res.status(500).json({
+        // Determine appropriate error message based on error type
+        let statusCode = 500;
+        let userMessage = 'We encountered an issue analyzing your email. Please try again.';
+
+        if (error.message && error.message.includes('parse')) {
+            userMessage = 'We had trouble processing your email. Please make sure it\'s a legitimate cold email and try again.';
+        } else if (error.message && error.message.includes('timeout')) {
+            userMessage = 'The request took too long to process. Please try again with a shorter email.';
+            statusCode = 504;
+        } else if (error.message && error.message.includes('API')) {
+            userMessage = 'Our AI service is temporarily unavailable. Please try again in a moment.';
+            statusCode = 503;
+        } else if (error.message && error.message.includes('rate limit')) {
+            userMessage = 'Too many requests. Please wait a moment and try again.';
+            statusCode = 429;
+        }
+
+        res.status(statusCode).json({
             error: 'Analysis failed',
-            message: error.message || 'Failed to analyze and improve the copy. Please try again.'
+            message: userMessage,
+            technical: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
